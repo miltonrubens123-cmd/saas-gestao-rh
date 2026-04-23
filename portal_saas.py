@@ -1571,11 +1571,9 @@ def aplicar_estilo_login():
 
         .login-brand {
             min-height: 720px;
-            height: 100%;
             border-radius: 32px;
             padding: 42px 42px;
-            background:
-                linear-gradient(180deg, rgba(7, 33, 66, 0.96) 0%, rgba(4, 35, 74, 0.98) 100%);
+            background: linear-gradient(180deg, rgba(7, 33, 66, 0.96) 0%, rgba(4, 35, 74, 0.98) 100%);
             border: 1px solid rgba(88, 140, 220, 0.28);
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
             display: flex;
@@ -1713,8 +1711,7 @@ def aplicar_estilo_login():
             font-size: 28px;
             line-height: 1.15;
             font-weight: 800;
-     
-           }
+        }
 
         .login-panel .sub {
             text-align: center;
@@ -1753,12 +1750,6 @@ def aplicar_estilo_login():
             box-shadow: 0 8px 22px rgba(20, 64, 146, 0.20);
         }
 
-        .stButton > button:hover {
-            border: 1px solid rgba(110, 160, 255, 0.75);
-            background: linear-gradient(180deg, #2463D3 0%, #1E58BF 100%);
-            color: #FFFFFF;
-        }
-
         .login-panel-divider {
             height: 1px;
             background: rgba(133, 163, 204, 0.18);
@@ -1772,47 +1763,6 @@ def aplicar_estilo_login():
             line-height: 1.5;
         }
 
-        .convite-card {
-            width: 100%;
-            max-width: 560px;
-            margin: 0 auto;
-            padding: 32px 28px 26px 28px;
-            background: rgba(2, 21, 46, 0.84);
-            border: 1px solid rgba(88, 140, 220, 0.22);
-            border-radius: 30px;
-            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
-        }
-
-        .convite-logo {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 16px;
-        }
-
-        .convite-logo img {
-            max-width: 104px;
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-
-        .convite-titulo {
-            text-align: center;
-            color: #FFFFFF;
-            font-size: 28px;
-            font-weight: 800;
-            line-height: 1.15;
-            margin-bottom: 8px;
-        }
-
-        .convite-subtitulo {
-            text-align: center;
-            color: #BFD1E8;
-            font-size: 15px;
-            line-height: 1.5;
-            margin-bottom: 22px;
-        }
-
         @media (max-width: 1100px) {
             .block-container {
                 max-width: 100%;
@@ -1820,24 +1770,24 @@ def aplicar_estilo_login():
                 display: block;
                 padding-top: 1rem !important;
                 padding-bottom: 1rem !important;
-            }
+        }
 
             .login-brand,
             .login-panel-wrap {
-                    min-height: auto;
-            }
+                min-height: auto;
+        }
 
             .login-panel {
                 margin-top: 20px;
-            }
+        }
 
             .brand-title-main {
                 font-size: 52px;
-            }
+        }
 
             .brand-title-sub {
                 font-size: 32px;
-            }
+        }
         }
 
         @media (max-width: 640px) {
@@ -1846,8 +1796,7 @@ def aplicar_estilo_login():
                 border-radius: 24px;
             }
 
-            .login-panel,
-            .convite-card {
+            .login-panel {
                 padding: 24px 18px 22px 18px;
                 border-radius: 24px;
             }
@@ -2209,7 +2158,6 @@ if not st.session_state.get("logado", False):
 
     col_left, col_right = st.columns([1.08, 0.92], gap="large")
 
-    # ===== LADO ESQUERDO (BRANDING) =====
     with col_left:
         st.markdown(
             '<div class="login-brand"><div class="login-brand-inner">',
@@ -2238,9 +2186,9 @@ if not st.session_state.get("logado", False):
             </div>
 
             <ul class="brand-benefits">
-                <li><span class="brand-check">✓</span> Controle de colaboradores em tempo real</li>
-                <li><span class="brand-check">✓</span> Estrutura por empresa, filial e setor</li>
-                <li><span class="brand-check">✓</span> Acesso segregado por cliente (multi-tenant)</li>
+                <li><span class="brand-check">✓</span> Controle do quadro em tempo real</li>
+                <li><span class="brand-check">✓</span> Estrutura por filiais, setores e cargos</li>
+                <li><span class="brand-check">✓</span> Acesso segregado por empresa</li>
             </ul>
 
             <div class="brand-divider"></div>
@@ -2254,7 +2202,6 @@ if not st.session_state.get("logado", False):
 
         st.markdown("</div></div>", unsafe_allow_html=True)
 
-    # ===== LADO DIREITO (LOGIN) =====
     with col_right:
         st.markdown(
             '<div class="login-panel-wrap"><div class="login-panel">',
@@ -2262,7 +2209,8 @@ if not st.session_state.get("logado", False):
         )
 
         st.markdown(
-            '<div class="login-panel-top-icon">🔒</div>', unsafe_allow_html=True
+            '<div class="login-panel-top-icon">🔒</div>',
+            unsafe_allow_html=True,
         )
         st.markdown("<h2>Acessar plataforma</h2>", unsafe_allow_html=True)
         st.markdown(
@@ -2273,30 +2221,32 @@ if not st.session_state.get("logado", False):
         usuario_input = st.text_input(
             "Usuário ou e-mail",
             placeholder="Digite seu usuário ou e-mail",
+            key="login_usuario",
         )
 
         senha_input = st.text_input(
             "Senha",
             type="password",
             placeholder="Digite sua senha",
+            key="login_senha",
         )
 
-        if st.button("ENTRAR", use_container_width=True):
+        if st.button("ENTRAR", use_container_width=True, key="btn_login"):
             usuario_digitado = usuario_input.strip()
             senha_digitada = senha_input.strip()
 
             if not usuario_digitado or not senha_digitada:
                 st.error("Informe usuário e senha.")
             else:
-                usuario = autenticar_usuario(usuario_digitado, senha_digitado)
+                usuario = autenticar_usuario(usuario_digitado, senha_digitada)
 
                 if usuario:
                     registrar_sessao_usuario(usuario)
                     st.rerun()
-
-                elif autenticar_admin(usuario_digitado, senha_digitado):
-                    st.error("Acesso master não habilitado neste fluxo SaaS.")
-
+                elif autenticar_admin(usuario_digitado, senha_digitada):
+                    st.error(
+                        "O acesso master legado não está habilitado neste fluxo SaaS."
+                    )
                 else:
                     st.error("Usuário ou senha inválidos.")
 
