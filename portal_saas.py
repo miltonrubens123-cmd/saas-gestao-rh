@@ -234,7 +234,7 @@ def validar_cpf(cpf):
     return len(re.sub(r"\D", "", cpf or "")) == 11
 
 
-st.set_page_config(page_title="Portal Arati", layout="wide")
+st.set_page_config(page_title="Gestão RH", layout="wide")
 
 BASE_DIR = Path(__file__).parent
 APP_DATA_DIR = Path.home() / ".businessvision"
@@ -281,7 +281,7 @@ def obter_email_config():
         "user": (cfg.get("user") or os.getenv("SMTP_USER") or "").strip(),
         "password": (cfg.get("password") or os.getenv("SMTP_PASSWORD") or "").strip(),
         "from_name": (
-            cfg.get("from_name") or os.getenv("SMTP_FROM_NAME") or "Portal Arati"
+            cfg.get("from_name") or os.getenv("SMTP_FROM_NAME") or "Gestão RH"
         ).strip(),
         "from_email": (
             cfg.get("from_email") or os.getenv("SMTP_FROM_EMAIL") or ""
@@ -395,7 +395,7 @@ def enviar_email_convite(destinatario, nome, link):
     ):
         return False, "Configuração de e-mail não encontrada em st.secrets['email']."
 
-    assunto = "Convite - Portal Arati"
+    assunto = "Convite - Gestão RH"
 
     html_body = f"""
 <html>
@@ -425,7 +425,7 @@ def enviar_email_convite(destinatario, nome, link):
             <tr>
               <td align="center" style="color:#cfe3ff; font-size:14px; padding-top:15px;">
                 Olá, {nome}.<br><br>
-                Você recebeu um convite para concluir seu cadastro no Portal Arati.
+                Você recebeu um convite para concluir seu cadastro no Gestão RH.
               </td>
             </tr>
 
@@ -463,7 +463,7 @@ def enviar_email_convite(destinatario, nome, link):
             <!-- RODAPÉ -->
             <tr>
               <td align="center" style="color:#7ea6d9; font-size:12px;">
-                Portal Arati<br>
+                Gestão RH<br>
                 Plataforma de gestão de pessoas<br><br>
                 Este e-mail foi enviado automaticamente.
               </td>
@@ -1792,7 +1792,7 @@ def render_tela_convite(token_convite):
         )
 
     st.markdown(
-        '<div class="convite-titulo">PORTAL ARATI</div>',
+        '<div class="convite-titulo">GESTÃO RH</div>',
         unsafe_allow_html=True,
     )
 
@@ -2299,7 +2299,7 @@ def render_sidebar_menu(menu_options, current_menu, logo_b64):
 
     if logo_b64:
         st.markdown(
-            f'<div class="bv-sidebar-top"><img class="bv-sidebar-logo" src="data:image/png;base64,{logo_b64}"><div class="bv-sidebar-title">Portal Arati</div></div>',
+            f'<div class="bv-sidebar-top"><img class="bv-sidebar-logo" src="data:image/png;base64,{logo_b64}"><div class="bv-sidebar-title">Gestão RH</div></div>',
             unsafe_allow_html=True,
         )
 
@@ -2345,7 +2345,7 @@ with header_logo_col:
 
 with header_title_col:
     st.markdown(
-        "<h1 style='margin-bottom:0;'>Portal Arati</h1>",
+        "<h1 style='margin-bottom:0;'>Gestão RH</h1>",
         unsafe_allow_html=True,
     )
 
@@ -2353,7 +2353,11 @@ st.markdown(
     "<hr style='border:1px solid rgba(120,145,170,0.12); margin-top:0;'>",
     unsafe_allow_html=True,
 )
-st.caption("Gestão de demandas e acompanhamento em tempo real")
+st.caption("Gestão de pessoas, indicadores e performance em um único lugar")
+
+empresa_contexto = st.session_state.get("empresa_nome") or "Empresa não identificada"
+plano_contexto = st.session_state.get("plano") or "não definido"
+st.caption(f"Empresa: {empresa_contexto} • Plano: {plano_contexto}")
 
 menu_options_admin = [
     "Dashboard RH",
@@ -3038,7 +3042,7 @@ elif menu == "Demandas Solicitadas":
 
 elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
     exigir_perfil("admin", "gestor")
-    st.header("Painel RH")
+    st.header("Dashboard RH")
 
     empresa_id = get_empresa_id()
 
@@ -3081,9 +3085,17 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         else 0
     )
 
-    st.info(
-        f"Plano atual: {plano_nome} • Usuários: {usados_usuarios} / {limite_usuarios if limite_usuarios is not None else 'ilimitado'} • Colaboradores ativos: {usados_colaboradores} / {limite_colaboradores if limite_colaboradores is not None else 'ilimitado'}"
+    plano_col1, plano_col2, plano_col3 = st.columns(3)
+    plano_col1.metric("Plano atual", str(plano_nome).title())
+    plano_col2.metric(
+        "Usuários",
+        f"{usados_usuarios} / {limite_usuarios if limite_usuarios is not None else 'Ilimitado'}",
     )
+    plano_col3.metric(
+        "Colaboradores ativos",
+        f"{usados_colaboradores} / {limite_colaboradores if limite_colaboradores is not None else 'Ilimitado'}",
+    )
+
 
     dados = conn.execute(
         """
@@ -3117,8 +3129,48 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
 
     df = pd.DataFrame(dados) if dados else pd.DataFrame()
 
+    total_filiais_empresa = conn.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM filiais
+        WHERE empresa_id = %s
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    total_setores_empresa = conn.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM setores
+        WHERE empresa_id = %s
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    total_cargos_empresa = conn.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM cargos
+        WHERE empresa_id = %s
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    estrutura1, estrutura2, estrutura3 = st.columns(3)
+    estrutura1.metric("Filiais", total_filiais_empresa["total"] if total_filiais_empresa else 0)
+    estrutura2.metric("Setores", total_setores_empresa["total"] if total_setores_empresa else 0)
+    estrutura3.metric("Cargos", total_cargos_empresa["total"] if total_cargos_empresa else 0)
+
     if df.empty:
-        st.info("Nenhum colaborador cadastrado ainda.")
+        st.info(
+            """🚀 Bem-vindo ao Gestão RH
+
+Para começar:
+1. Cadastre uma filial
+2. Cadastre um setor
+3. Cadastre um cargo
+4. Cadastre seu primeiro colaborador"""
+        )
     else:
         df["data_admissao"] = pd.to_datetime(df["data_admissao"], errors="coerce")
         df["data_desligamento"] = pd.to_datetime(
