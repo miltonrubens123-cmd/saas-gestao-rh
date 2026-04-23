@@ -106,7 +106,7 @@ def validar_cpf(cpf):
     return len(re.sub(r"\D", "", cpf or "")) == 11
 
 
-st.set_page_config(page_title="Portal Arati", layout="wide")
+st.set_page_config(page_title="Gestão RH", layout="wide")
 
 BASE_DIR = Path(__file__).parent
 APP_DATA_DIR = Path.home() / ".businessvision"
@@ -168,21 +168,24 @@ def obter_email_config():
 def get_empresa_id():
     empresa_id = st.session_state.get("empresa_id")
     if not empresa_id:
-        raise RuntimeError("Sessão sem empresa_id.")
+        st.error("Sessão inválida ou expirada. Faça login novamente.")
+        st.stop()
     return empresa_id
 
 
 def get_user_id():
     user_id = st.session_state.get("user_id")
     if not user_id:
-        raise RuntimeError("Sessão sem user_id.")
+        st.error("Sessão inválida ou expirada. Faça login novamente.")
+        st.stop()
     return user_id
 
 
 def get_perfil():
     perfil = st.session_state.get("perfil")
     if not perfil:
-        raise RuntimeError("Sessão sem perfil.")
+        st.error("Sessão inválida ou expirada. Faça login novamente.")
+        st.stop()
     return perfil
 
 
@@ -1541,163 +1544,458 @@ def aplicar_estilo_login():
     st.markdown(
         """
         <style>
+        html, body, [data-testid="stAppViewContainer"] {
+            height: 100%;
+        }
+
         .stApp {
-            background: linear-gradient(135deg, #061C33 0%, #0B3A63 100%);
+            background: linear-gradient(135deg, #04182D 0%, #0B3A63 100%);
         }
 
         section[data-testid="stSidebar"] {
             display: none;
         }
 
+        [data-testid="stHeader"] {
+            background: transparent;
+        }
+
         .block-container {
             max-width: 1380px;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
             padding-top: 1.5rem !important;
             padding-bottom: 1.5rem !important;
         }
 
         .login-brand {
-            min-height: 680px;
-            border-radius: 28px;
+            min-height: 720px;
+            height: 100%;
+            border-radius: 32px;
             padding: 42px 42px;
-            background: linear-gradient(160deg, #071728 0%, #0b2d55 55%, #123c71 100%);
-            color: #f3f7fb;
+            background:
+                linear-gradient(180deg, rgba(7, 33, 66, 0.96) 0%, rgba(4, 35, 74, 0.98) 100%);
+            border: 1px solid rgba(88, 140, 220, 0.28);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
             display: flex;
-            flex-direction: column;
-            justify-content: center;
-            border: 1px solid rgba(255,255,255,0.08);
-            box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+            align-items: center;
         }
 
         .login-brand-inner {
+            width: 100%;
             max-width: 560px;
         }
 
         .login-brand-logo {
-            margin-bottom: 18px;
+            margin-bottom: 22px;
         }
 
         .login-brand-logo img {
-            max-width: 130px;
+            max-width: 126px;
+            width: 100%;
             height: auto;
             display: block;
         }
 
-        .login-brand h1 {
-            font-size: 42px;
-            line-height: 1.08;
-            margin: 18px 0 14px 0;
-            color: #ffffff;
+        .brand-kicker {
+            color: #71B6FF;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+
+        .brand-title-main {
+            color: #FFFFFF;
+            font-size: 66px;
+            line-height: 1.02;
             font-weight: 800;
+            margin: 0;
         }
 
-        .login-brand p {
-            font-size: 17px;
-            line-height: 1.7;
-            color: #d7e6f7;
-            margin: 0 0 20px 0;
+        .brand-title-sub {
+            color: #6FAEFF;
+            font-size: 40px;
+            line-height: 1.08;
+            font-weight: 700;
+            margin: 10px 0 26px 0;
         }
 
-        .login-brand ul {
+        .brand-description {
+            color: #E4EEFA;
+            font-size: 18px;
+            line-height: 1.65;
+            margin: 0 0 26px 0;
+            max-width: 520px;
+        }
+
+        .brand-benefits {
             list-style: none;
             padding: 0;
-            margin: 22px 0 0 0;
+            margin: 0 0 28px 0;
         }
 
-        .login-brand li {
-            margin: 0 0 12px 0;
-            color: #e7f0fb;
-            font-size: 15px;
+        .brand-benefits li {
+            color: #F3F8FF;
+            font-size: 17px;
+            line-height: 1.55;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
 
-        .login-brand .brand-kicker {
-            color: #8fc2ff;
-            font-weight: 700;
-            letter-spacing: .08em;
-            text-transform: uppercase;
+        .brand-check {
+            width: 18px;
+            height: 18px;
+            min-width: 18px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(60, 126, 255, 0.18);
+            border: 1px solid rgba(111, 174, 255, 0.35);
+            color: #A8CCFF;
             font-size: 12px;
-            margin-bottom: 8px;
+            font-weight: 700;
         }
 
-        .login-brand .brand-footer {
-            color: #aac7e8;
-            font-size: 13px;
-            margin-top: 22px;
+        .brand-divider {
+            height: 1px;
+            width: 100%;
+            max-width: 520px;
+            background: rgba(133, 163, 204, 0.22);
+            margin: 18px 0 22px 0;
+        }
+
+        .brand-footer {
+            color: #B9CAE0;
+            font-size: 16px;
+            line-height: 1.6;
+            max-width: 520px;
+        }
+
+        .login-panel-wrap {
+            min-height: 720px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .login-panel {
             width: 100%;
-            max-width: 500px;
-            margin: 60px auto 0 auto;
-            background: rgba(5, 22, 38, 0.72);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 24px;
-            padding: 34px 30px 28px 30px;
-            box-shadow: 0 18px 54px rgba(0,0,0,0.22);
+            max-width: 520px;
+            margin: auto;
+            padding: 38px 34px 30px 34px;
+            background: rgba(2, 21, 46, 0.84);
+            border: 1px solid rgba(88, 140, 220, 0.22);
+            border-radius: 30px;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+        }
+
+        .login-panel-top-icon {
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 18px auto;
+            border-radius: 999px;
+            border: 1px solid rgba(111, 174, 255, 0.20);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #2E7DFF;
+            font-size: 30px;
         }
 
         .login-panel h2 {
-            margin: 0 0 8px 0;
-            text-align: left;
-            color: #ffffff;
-            font-size: 18px;
+            margin: 0 0 12px 0;
+            text-align: center;
+            color: #FFFFFF;
+            font-size: 28px;
+            line-height: 1.15;
             font-weight: 800;
-            letter-spacing: .02em;
-        }
+     
+           }
 
         .login-panel .sub {
-            text-align: left;
-            color: #c8d8eb;
-            font-size: 14px;
-            margin-bottom: 18px;
+            text-align: center;
+            color: #CBD8EA;
+            font-size: 15px;
+            line-height: 1.5;
+            margin-bottom: 24px;
         }
 
         .stTextInput label {
-            color: #dfeaf5 !important;
+            color: #E8F0FB !important;
             font-weight: 600 !important;
         }
 
         .stTextInput > div > div > input {
-            background-color: rgba(255,255,255,0.06) !important;
-            color: white !important;
-            border: 1px solid rgba(173, 216, 255, 0.22) !important;
-            border-radius: 10px !important;
+            background: rgba(255,255,255,0.05) !important;
+            color: #FFFFFF !important;
+            border: 1px solid rgba(150, 184, 227, 0.22) !important;
+            border-radius: 12px !important;
+            min-height: 48px !important;
+        }
+
+        .stTextInput > div > div > input::placeholder {
+            color: #8EA7C6 !important;
         }
 
         .stButton > button {
             width: 100%;
-            border-radius: 12px;
+            min-height: 50px;
+            border-radius: 14px;
             font-weight: 700;
+            font-size: 16px;
+            border: 1px solid rgba(70, 122, 214, 0.55);
+            background: linear-gradient(180deg, #1E56BA 0%, #1A4EAB 100%);
+            color: #FFFFFF;
+            box-shadow: 0 8px 22px rgba(20, 64, 146, 0.20);
         }
 
-        @media (max-width: 980px) {
+        .stButton > button:hover {
+            border: 1px solid rgba(110, 160, 255, 0.75);
+            background: linear-gradient(180deg, #2463D3 0%, #1E58BF 100%);
+            color: #FFFFFF;
+        }
+
+        .login-panel-divider {
+            height: 1px;
+            background: rgba(133, 163, 204, 0.18);
+            margin: 22px 0 18px 0;
+        }
+
+        .login-panel-footer {
+            text-align: center;
+            color: #AABDD6;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .convite-card {
+            width: 100%;
+            max-width: 560px;
+            margin: 0 auto;
+            padding: 32px 28px 26px 28px;
+            background: rgba(2, 21, 46, 0.84);
+            border: 1px solid rgba(88, 140, 220, 0.22);
+            border-radius: 30px;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+        }
+
+        .convite-logo {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 16px;
+        }
+
+        .convite-logo img {
+            max-width: 104px;
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .convite-titulo {
+            text-align: center;
+            color: #FFFFFF;
+            font-size: 28px;
+            font-weight: 800;
+            line-height: 1.15;
+            margin-bottom: 8px;
+        }
+
+        .convite-subtitulo {
+            text-align: center;
+            color: #BFD1E8;
+            font-size: 15px;
+            line-height: 1.5;
+            margin-bottom: 22px;
+        }
+
+        @media (max-width: 1100px) {
             .block-container {
                 max-width: 100%;
+                min-height: auto;
+                display: block;
                 padding-top: 1rem !important;
                 padding-bottom: 1rem !important;
             }
 
-            .login-brand {
-                min-height: auto;
-                padding: 30px 24px;
-            }
-
-            .login-brand-inner {
-                max-width: 100%;
-            }
-
-            .login-brand h1 {
-                font-size: 32px;
+            .login-brand,
+            .login-panel-wrap {
+                    min-height: auto;
             }
 
             .login-panel {
                 margin-top: 20px;
-                max-width: 100%;
+            }
+
+            .brand-title-main {
+                font-size: 52px;
+            }
+
+            .brand-title-sub {
+                font-size: 32px;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .login-brand {
+                padding: 28px 22px;
+                border-radius: 24px;
+            }
+
+            .login-panel,
+            .convite-card {
+                padding: 24px 18px 22px 18px;
+                border-radius: 24px;
+            }
+
+            .brand-title-main {
+                font-size: 42px;
+            }
+
+            .brand-title-sub {
+                font-size: 26px;
+            }
+
+            .brand-description,
+            .brand-benefits li,
+            .brand-footer {
+                font-size: 15px;
             }
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_tela_convite(token_convite):
+    aplicar_estilo_login()
+
+    convite = obter_convite_por_token(token_convite)
+
+    col_left, col_center, col_right = st.columns([0.18, 0.64, 0.18])
+
+    with col_center:
+        st.markdown('<div class="convite-card">', unsafe_allow_html=True)
+
+        if logo_b64:
+            st.markdown(
+                f"""
+                <div class="convite-logo">
+                    <img src="data:image/png;base64,{logo_b64}">
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            """
+            <div class="convite-titulo">Concluir cadastro</div>
+            <div class="convite-subtitulo">
+                Finalize seu acesso ao ambiente Gestão RH.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if not convite:
+            st.error("Convite inválido.")
+            st.markdown("</div>", unsafe_allow_html=True)
+            st.stop()
+
+        if convite["status"] == "concluido":
+            st.success("Este convite já foi utilizado.")
+            portal_url = (
+                st.secrets.get("APP_BASE_URL") or os.getenv("APP_BASE_URL", "") or ""
+            ).rstrip("/")
+            if portal_url:
+                st.link_button("Acessar portal", portal_url, use_container_width=True)
+                st.caption(f"Portal: {portal_url}")
+            st.markdown("</div>", unsafe_allow_html=True)
+            st.stop()
+
+        if convite["status"] in ("cancelado", "expirado") or convite_expirado(convite):
+            st.error("Este convite expirou ou foi cancelado.")
+            st.markdown("</div>", unsafe_allow_html=True)
+            st.stop()
+
+        st.info(
+            f"Convite para {convite['nome']} • Perfil: {convite['tipo_usuario'].capitalize()}"
+            + (
+                f" • Empresa: {convite['empresa_nome']}"
+                if convite.get("empresa_nome")
+                else ""
+            )
+        )
+
+        email = st.text_input("E-mail", value=convite["email"], disabled=True)
+        nome = st.text_input("Nome completo", value=convite["nome"])
+        usuario = st.text_input(
+            "Usuário",
+            value=convite.get("usuario_sugerido") or gerar_usuario(convite["nome"]),
+        )
+        senha = st.text_input("Senha", type="password")
+        confirmar_senha = st.text_input("Confirmar senha", type="password")
+
+        cpf = ""
+        funcao = ""
+        if convite["tipo_usuario"] == "cliente":
+            cpf = st.text_input("CPF")
+            funcao = st.text_input("Função")
+        else:
+            funcao = st.text_input("Função / Cargo")
+
+        if st.button("Concluir cadastro", use_container_width=True):
+            if not nome.strip() or not usuario.strip() or not senha.strip():
+                st.error("Preencha nome, usuário e senha.")
+            elif senha != confirmar_senha:
+                st.error("As senhas não conferem.")
+            elif len(senha.strip()) < 6:
+                st.error("A senha deve ter pelo menos 6 caracteres.")
+            else:
+                try:
+                    concluir_convite(
+                        convite=convite,
+                        nome=nome.strip(),
+                        usuario=usuario.strip(),
+                        senha=senha.strip(),
+                        cpf=cpf.strip(),
+                        funcao=funcao.strip(),
+                        email=email.strip(),
+                        nome_atendente=nome.strip(),
+                    )
+
+                    st.success(
+                        "Cadastro concluído com sucesso. Agora você já pode acessar o portal."
+                    )
+
+                    portal_url = (
+                        st.secrets.get("APP_BASE_URL")
+                        or os.getenv("APP_BASE_URL", "")
+                        or ""
+                    ).rstrip("/")
+
+                    st.info(f"Usuário cadastrado: {usuario}")
+
+                    if portal_url:
+                        st.link_button(
+                            "Acessar portal", portal_url, use_container_width=True
+                        )
+                        st.caption(f"Portal: {portal_url}")
+                    else:
+                        st.warning("URL do portal não configurada.")
+
+                except ValueError as exc:
+                    st.error(str(exc))
+                except Exception as exc:
+                    st.error(f"Erro ao concluir cadastro: {exc}")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.stop()
 
 
 def render_tela_convite(token_convite):
@@ -1901,11 +2199,122 @@ invite_token = st.query_params.get("invite")
 if invite_token:
     render_tela_convite(invite_token)
 
+# =========================
+# TELA DE LOGIN (SaaS)
+# =========================
+
+if not st.session_state.get("logado", False):
+
+    aplicar_estilo_login()
+
+    col_left, col_right = st.columns([1.08, 0.92], gap="large")
+
+    # ===== LADO ESQUERDO (BRANDING) =====
+    with col_left:
+        st.markdown(
+            '<div class="login-brand"><div class="login-brand-inner">',
+            unsafe_allow_html=True,
+        )
+
+        if logo_b64:
+            st.markdown(
+                f"""
+                <div class="login-brand-logo">
+                    <img src="data:image/png;base64,{logo_b64}">
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            """
+            <div class="brand-kicker">Plataforma corporativa</div>
+            <div class="brand-title-main">Gestão RH</div>
+            <div class="brand-title-sub">Controle e inteligência para sua operação</div>
+
+            <div class="brand-description">
+                Centralize estrutura organizacional, usuários, colaboradores e indicadores
+                em um ambiente seguro, escalável e orientado por dados.
+            </div>
+
+            <ul class="brand-benefits">
+                <li><span class="brand-check">✓</span> Controle de colaboradores em tempo real</li>
+                <li><span class="brand-check">✓</span> Estrutura por empresa, filial e setor</li>
+                <li><span class="brand-check">✓</span> Acesso segregado por cliente (multi-tenant)</li>
+            </ul>
+
+            <div class="brand-divider"></div>
+
+            <div class="brand-footer">
+                Arquitetura SaaS • Segurança • Performance
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("</div></div>", unsafe_allow_html=True)
+
+    # ===== LADO DIREITO (LOGIN) =====
+    with col_right:
+        st.markdown(
+            '<div class="login-panel-wrap"><div class="login-panel">',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            '<div class="login-panel-top-icon">🔒</div>', unsafe_allow_html=True
+        )
+        st.markdown("<h2>Acessar plataforma</h2>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='sub'>Entre com seu usuário corporativo.</div>",
+            unsafe_allow_html=True,
+        )
+
+        usuario_input = st.text_input(
+            "Usuário ou e-mail",
+            placeholder="Digite seu usuário ou e-mail",
+        )
+
+        senha_input = st.text_input(
+            "Senha",
+            type="password",
+            placeholder="Digite sua senha",
+        )
+
+        if st.button("ENTRAR", use_container_width=True):
+            usuario_digitado = usuario_input.strip()
+            senha_digitada = senha_input.strip()
+
+            if not usuario_digitado or not senha_digitada:
+                st.error("Informe usuário e senha.")
+            else:
+                usuario = autenticar_usuario(usuario_digitado, senha_digitado)
+
+                if usuario:
+                    registrar_sessao_usuario(usuario)
+                    st.rerun()
+
+                elif autenticar_admin(usuario_digitado, senha_digitado):
+                    st.error("Acesso master não habilitado neste fluxo SaaS.")
+
+                else:
+                    st.error("Usuário ou senha inválidos.")
+
+        st.markdown('<div class="login-panel-divider"></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="login-panel-footer">Ambiente seguro e preparado para empresas.</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("</div></div>", unsafe_allow_html=True)
+
+    st.stop()
+
 
 if not st.session_state.logado:
     aplicar_estilo_login()
 
-    col_left, col_right = st.columns([1.05, 0.95], gap="large")
+    col_left, col_right = st.columns([1.08, 0.92], gap="large")
 
     with col_left:
         st.markdown(
@@ -1913,34 +2322,52 @@ if not st.session_state.logado:
             unsafe_allow_html=True,
         )
 
-    if logo_b64:
+        if logo_b64:
+            st.markdown(
+                f"""
+                <div class="login-brand-logo">
+                    <img src="data:image/png;base64,{logo_b64}">
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
         st.markdown(
-            f"""
-            <div class="login-brand-logo">
-                <img src="data:image/png;base64,{logo_b64}">
+            """
+            <div class="brand-kicker">Plataforma corporativa</div>
+            <div class="brand-title-main">Gestão RH -</div>
+            <div class="brand-title-sub">Para empresas que exigem controle</div>
+
+            <div class="brand-description">
+                Centralize estrutura organizacional, usuários, colaboradores e indicadores em um ambiente seguro, profissional e preparado para crescer com a operação.
+            </div>
+
+            <ul class="brand-benefits">
+                <li><span class="brand-check">✓</span> Controle do quadro em tempo real</li>
+                <li><span class="brand-check">✓</span> Estrutura por filiais, setores e cargos</li>
+                <li><span class="brand-check">✓</span> Acesso segregado por empresa</li>
+            </ul>
+
+            <div class="brand-divider"></div>
+
+            <div class="brand-footer">
+                Ambiente seguro, arquitetura SaaS e gestão orientada por dados.
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-    st.markdown(
-        """
-        <div class="brand-kicker">Plataforma corporativa</div>
-        <h1>Gestão RH para empresas que exigem controle.</h1>
-        <p>Centralize estrutura organizacional, usuários, colaboradores e indicadores em um ambiente seguro, profissional e preparado para crescer com a operação.</p>
-        <ul>
-            <li>✔ Controle do quadro em tempo real</li>
-            <li>✔ Estrutura por filiais, setores e cargos</li>
-            <li>✔ Acesso segregado por empresa</li>
-        </ul>
-        <div class="brand-footer">Ambiente seguro, arquitetura SaaS e gestão orientada por dados.</div>
-        """,
-        unsafe_allow_html=True,
-    )
+        st.markdown("</div></div>", unsafe_allow_html=True)
 
     with col_right:
-        st.markdown('<div class="login-panel">', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="login-panel-wrap"><div class="login-panel">',
+            unsafe_allow_html=True,
+        )
 
+        st.markdown(
+            '<div class="login-panel-top-icon">🔒</div>', unsafe_allow_html=True
+        )
         st.markdown("<h2>Acessar plataforma</h2>", unsafe_allow_html=True)
         st.markdown(
             "<div class='sub'>Entre com seu e-mail ou usuário corporativo.</div>",
@@ -1951,13 +2378,14 @@ if not st.session_state.logado:
             "Usuário ou e-mail",
             placeholder="Digite seu usuário ou e-mail",
         )
+
         senha_input = st.text_input(
             "Senha",
             type="password",
             placeholder="Digite sua senha",
         )
 
-        if st.button("ENTRAR →", use_container_width=True):
+        if st.button("ENTRAR", use_container_width=True):
             usuario_digitado = usuario_input.strip()
             senha_digitada = senha_input.strip()
 
@@ -1975,10 +2403,14 @@ if not st.session_state.logado:
                 else:
                     st.error("Usuário ou senha inválidos.")
 
-        st.caption("Ambiente seguro e preparado para empresas.")
+        st.markdown('<div class="login-panel-divider"></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="login-panel-footer">Ambiente seguro e preparado para empresas.</div>',
+            unsafe_allow_html=True,
+        )
+
         st.markdown("</div></div>", unsafe_allow_html=True)
 
-    st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
 
