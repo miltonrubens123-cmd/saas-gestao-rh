@@ -5329,7 +5329,7 @@ elif menu == "Quadro de Funcionários" and perfil_atual in ("admin", "gestor"):
     exigir_perfil("admin", "gestor")
     st.header("Quadro de Funcionários")
     empresa_id = get_empresa_contexto()
-
+    ###############
     dados = conn.execute(
         """
         SELECT
