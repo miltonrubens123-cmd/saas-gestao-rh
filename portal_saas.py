@@ -769,42 +769,25 @@ def aplicar_estilo_login():
     st.markdown(
         """
         <style>
+        body {
+            background-color: #0f172a;
+        }
+
         .stApp {
-            background: linear-gradient(180deg, #061C33 0%, #0B3A63 100%);
+            background: linear-gradient(135deg, #0f172a, #1e3a8a);
         }
 
-        section[data-testid="stSidebar"] {
-            display: none;
+        input {
+            border-radius: 8px !important;
         }
 
-        .block-container {
-            min-height: 100vh;
-            padding-top: 0 !important;
-            padding-bottom: 0 !important;
-            max-width: 100% !important;
-            padding-left: 0 !important;
-            padding-right: 0 !important;
-        }
-
-        .stTextInput label, .stSelectbox label {
-            color: #dfeaf5 !important;
-            font-weight: 600 !important;
-        }
-
-        .stTextInput > div > div > input {
-            background-color: rgba(255,255,255,0.06) !important;
+        button[kind="primary"] {
+            background-color: #1e40af !important;
             color: white !important;
-            border: 1px solid rgba(173, 216, 255, 0.22) !important;
-            border-radius: 10px !important;
-        }
-
-        .stButton > button {
-            width: 100%;
-            border-radius: 12px;
-            font-weight: 700;
+            border-radius: 8px !important;
         }
         </style>
-        """,
+    """,
         unsafe_allow_html=True,
     )
 
@@ -1386,34 +1369,58 @@ if not st.session_state.logado:
             """,
             unsafe_allow_html=True,
         )
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with col_right:
-        st.markdown('<div class="login-panel-wrap"><div class="login-panel">', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="login-panel-wrap"><div class="login-panel">',
+            unsafe_allow_html=True,
+        )
 
         bt1, bt2 = st.columns(2)
         with bt1:
-            if st.button("Entrar", key="btn_modo_login", use_container_width=True, type="primary" if modo_acesso == "login" else "secondary"):
+            if st.button(
+                "Entrar",
+                key="btn_modo_login",
+                use_container_width=True,
+                type="primary" if modo_acesso == "login" else "secondary",
+            ):
                 st.session_state.modo_acesso = "login"
                 st.rerun()
         with bt2:
-            if st.button("Criar conta", key="btn_modo_cadastro", use_container_width=True, type="primary" if modo_acesso == "cadastro" else "secondary"):
+            if st.button(
+                "Criar conta",
+                key="btn_modo_cadastro",
+                use_container_width=True,
+                type="primary" if modo_acesso == "cadastro" else "secondary",
+            ):
                 st.session_state.modo_acesso = "cadastro"
                 st.rerun()
 
         if modo_acesso == "cadastro":
             st.markdown("<h2>Crie sua conta</h2>", unsafe_allow_html=True)
-            st.markdown("<div class='sub'>Crie sua empresa e seu acesso administrador.</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='sub'>Crie sua empresa e seu acesso administrador.</div>",
+                unsafe_allow_html=True,
+            )
 
             nome_empresa = st.text_input("Nome da empresa", key="cad_empresa_nome")
             cnpj_empresa = st.text_input("CNPJ (opcional)", key="cad_empresa_cnpj")
             nome_admin = st.text_input("Seu nome", key="cad_admin_nome")
             email_admin = st.text_input("Seu e-mail", key="cad_admin_email")
             usuario_admin_cad = st.text_input("Usuário", key="cad_admin_usuario")
-            senha_admin_cad = st.text_input("Senha", type="password", key="cad_admin_senha")
-            confirmar_senha_admin_cad = st.text_input("Confirmar senha", type="password", key="cad_admin_senha_confirmar")
+            senha_admin_cad = st.text_input(
+                "Senha", type="password", key="cad_admin_senha"
+            )
+            confirmar_senha_admin_cad = st.text_input(
+                "Confirmar senha", type="password", key="cad_admin_senha_confirmar"
+            )
 
-            if st.button("Criar minha conta", key="btn_criar_minha_conta", use_container_width=True):
+            if st.button(
+                "Criar minha conta",
+                key="btn_criar_minha_conta",
+                use_container_width=True,
+            ):
                 if not nome_empresa.strip():
                     st.error("Informe o nome da empresa.")
                 elif cnpj_empresa.strip() and not validar_cnpj(cnpj_empresa.strip()):
@@ -1443,9 +1450,13 @@ if not st.session_state.logado:
                             senha=senha_admin_cad,
                             perfil="admin",
                         )
-                        usuario_criado = obter_usuario_por_login(usuario_admin_cad.strip())
+                        usuario_criado = obter_usuario_por_login(
+                            usuario_admin_cad.strip()
+                        )
                         if not usuario_criado:
-                            raise ValueError("Conta criada, mas não foi possível localizar o usuário para login.")
+                            raise ValueError(
+                                "Conta criada, mas não foi possível localizar o usuário para login."
+                            )
                         registrar_sessao_usuario(usuario_criado)
                         st.success("Conta criada com sucesso.")
                         st.rerun()
@@ -1455,10 +1466,22 @@ if not st.session_state.logado:
                         st.error(f"Erro ao criar conta: {exc}")
         else:
             st.markdown("<h2>Acessar plataforma</h2>", unsafe_allow_html=True)
-            st.markdown("<div class='sub'>Entre com seu e-mail ou usuário corporativo.</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='sub'>Entre com seu e-mail ou usuário corporativo.</div>",
+                unsafe_allow_html=True,
+            )
 
-            usuario_input = st.text_input("E-mail ou usuário", placeholder="Digite seu e-mail ou usuário", key="login_usuario_input")
-            senha_input = st.text_input("Senha", type="password", placeholder="Digite sua senha", key="login_senha_input")
+            usuario_input = st.text_input(
+                "E-mail ou usuário",
+                placeholder="Digite seu e-mail ou usuário",
+                key="login_usuario_input",
+            )
+            senha_input = st.text_input(
+                "Senha",
+                type="password",
+                placeholder="Digite sua senha",
+                key="login_senha_input",
+            )
 
             if st.button("Entrar", key="btn_login_submit", use_container_width=True):
                 usuario_digitado = usuario_input.strip()
@@ -1472,17 +1495,18 @@ if not st.session_state.logado:
                         registrar_sessao_usuario(usuario)
                         st.rerun()
                     elif autenticar_admin(usuario_digitado, senha_digitada):
-                        st.error("O acesso master legado não está habilitado neste fluxo SaaS. Cadastre este usuário na tabela usuarios.")
+                        st.error(
+                            "O acesso master legado não está habilitado neste fluxo SaaS. Cadastre este usuário na tabela usuarios."
+                        )
                     else:
                         st.error("Usuário ou senha inválidos.")
 
             st.caption("Ambiente seguro e preparado para empresas.")
 
-        st.markdown('</div></div>', unsafe_allow_html=True)
+        st.markdown("</div></div>", unsafe_allow_html=True)
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
-
 
 
 def validar_limite_usuarios_empresa(empresa_id):
@@ -1962,7 +1986,6 @@ if menu == "Usuários da Empresa" and perfil_atual == "admin":
                         ):
                             st.session_state.usuario_empresa_editando_id = None
                             st.rerun()
-
 
 
 with st.sidebar:
@@ -2640,9 +2663,15 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         (empresa_id,),
     ).fetchone()
 
-    plano_nome = (empresa_info["plano"] if empresa_info and empresa_info.get("plano") else "não definido")
+    plano_nome = (
+        empresa_info["plano"]
+        if empresa_info and empresa_info.get("plano")
+        else "não definido"
+    )
     limite_usuarios = empresa_info["limite_usuarios"] if empresa_info else None
-    limite_colaboradores = empresa_info["limite_colaboradores"] if empresa_info else None
+    limite_colaboradores = (
+        empresa_info["limite_colaboradores"] if empresa_info else None
+    )
     usados_usuarios = total_usuarios_empresa["total"] if total_usuarios_empresa else 0
     usados_colaboradores = (
         total_colaboradores_ativos_empresa["total"]
@@ -2660,7 +2689,6 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         "Colaboradores ativos",
         f"{usados_colaboradores} / {limite_colaboradores if limite_colaboradores is not None else 'Ilimitado'}",
     )
-
 
     dados = conn.execute(
         """
@@ -2722,9 +2750,15 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
     ).fetchone()
 
     estrutura1, estrutura2, estrutura3 = st.columns(3)
-    estrutura1.metric("Filiais", total_filiais_empresa["total"] if total_filiais_empresa else 0)
-    estrutura2.metric("Setores", total_setores_empresa["total"] if total_setores_empresa else 0)
-    estrutura3.metric("Cargos", total_cargos_empresa["total"] if total_cargos_empresa else 0)
+    estrutura1.metric(
+        "Filiais", total_filiais_empresa["total"] if total_filiais_empresa else 0
+    )
+    estrutura2.metric(
+        "Setores", total_setores_empresa["total"] if total_setores_empresa else 0
+    )
+    estrutura3.metric(
+        "Cargos", total_cargos_empresa["total"] if total_cargos_empresa else 0
+    )
 
     if df.empty:
         st.info(
@@ -2847,12 +2881,29 @@ Para começar:
         )
 
         r1, r2, r3 = st.columns(3)
-        r1.metric("Plano atual", (empresa_info["plano"].title() if empresa_info and empresa_info.get("plano") else "Starter"))
-        usuarios_total = total_usuarios_empresa["total"] if total_usuarios_empresa else 0
+        r1.metric(
+            "Plano atual",
+            (
+                empresa_info["plano"].title()
+                if empresa_info and empresa_info.get("plano")
+                else "Starter"
+            ),
+        )
+        usuarios_total = (
+            total_usuarios_empresa["total"] if total_usuarios_empresa else 0
+        )
         limite_usuarios = empresa_info["limite_usuarios"] if empresa_info else None
-        r2.metric("Usuários", f"{usuarios_total} / {limite_usuarios if limite_usuarios is not None else '∞'}")
-        limite_colaboradores = empresa_info["limite_colaboradores"] if empresa_info else None
-        r3.metric("Colaboradores ativos", f"{registros_ativos} / {limite_colaboradores if limite_colaboradores is not None else '∞'}")
+        r2.metric(
+            "Usuários",
+            f"{usuarios_total} / {limite_usuarios if limite_usuarios is not None else '∞'}",
+        )
+        limite_colaboradores = (
+            empresa_info["limite_colaboradores"] if empresa_info else None
+        )
+        r3.metric(
+            "Colaboradores ativos",
+            f"{registros_ativos} / {limite_colaboradores if limite_colaboradores is not None else '∞'}",
+        )
 
         e1, e2, e3 = st.columns(3)
         e1.metric("Filiais", total_filiais["total"] if total_filiais else 0)
