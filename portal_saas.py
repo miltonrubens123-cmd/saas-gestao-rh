@@ -4708,22 +4708,6 @@ elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
         )
         colaborador_id_sel = None
 
-if escopo_tipo == "colaborador":
-    colaborador_labels = ["Selecione"] + [
-        f"{row['nome']} ({row['matricula']})" for row in colaboradores
-    ]
-
-    colaborador_nome_sel = st.selectbox(
-        "Colaborador", colaborador_labels, key="sst_colaborador"
-    )
-
-    if colaborador_nome_sel != "Selecione":
-        matricula = colaborador_nome_sel.split("(")[-1].replace(")", "")
-
-        colaborador_id_sel = next(
-            row["id"] for row in colaboradores if row["matricula"] == matricula
-        )
-
         with c2:
             filial_labels = ["Empresa / Geral"] + [row["nome"] for row in filiais]
             filial_nome_sel = st.selectbox(
@@ -4970,26 +4954,31 @@ if escopo_tipo == "colaborador":
 
     documentos = conn.execute(
         """
-        SELECT
-            d.id,
-            d.titulo,
-            d.data_emissao,
-            d.data_vencimento,
-            d.status,
-            d.observacao,
-            d.arquivo_nome,
-            d.revisao_necessaria,
-            t.nome AS tipo_documento,
-            t.escopo,
-            f.nome AS filial_nome,
-            c.nome AS colaborador_nome
-        FROM documentos_sst d
-        JOIN tipos_documento_sst t ON t.id = d.tipo_documento_id
-        LEFT JOIN filiais f ON f.id = d.filial_id
-        LEFT JOIN colaboradores c ON c.id = d.colaborador_id
-        WHERE d.empresa_id = %s
-        ORDER BY d.data_vencimento NULLS LAST, d.id DESC
-        """,
+    SELECT
+        d.id,
+        td.nome AS tipo_documento,
+        td.escopo,
+        d.titulo,
+        d.data_emissao,
+        d.data_vencimento,
+        d.revisao_necessaria,
+        c.nome AS colaborador_nome,
+        c.matricula,
+        f.nome AS filial_nome,
+        CASE
+            WHEN d.revisao_necessaria = TRUE THEN 'Revisão necessária'
+            WHEN d.data_vencimento IS NULL THEN 'Vigente'
+            WHEN d.data_vencimento < CURRENT_DATE THEN 'Vencido'
+            WHEN d.data_vencimento <= CURRENT_DATE + INTERVAL '30 days' THEN 'A vencer'
+            ELSE 'Vigente'
+        END AS status_calculado
+    FROM documentos_sst d
+    JOIN tipos_documento_sst td ON td.id = d.tipo_documento_id
+    LEFT JOIN colaboradores c ON c.id = d.colaborador_id
+    LEFT JOIN filiais f ON f.id = d.filial_id
+    WHERE d.empresa_id = %s
+    ORDER BY d.data_vencimento NULLS LAST, d.id DESC
+    """,
         (empresa_id,),
     ).fetchall()
 
