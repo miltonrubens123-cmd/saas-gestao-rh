@@ -1211,7 +1211,13 @@ menu_options_gestor = [
 st.session_state.setdefault("menu_atual", "Dashboard RH")
 menu_options_usuario = ["Nova Solicitação", "Demandas Solicitadas"]
 
-perfil_atual = st.session_state.get("perfil")
+usuario = obter_usuario_logado()
+
+if not usuario:
+    st.stop()
+
+perfil_atual = usuario["perfil"]
+empresa_id = usuario["empresa_id"]
 if perfil_atual == "admin":
     menu_options = menu_options_admin
 elif perfil_atual == "gestor":
@@ -1227,7 +1233,9 @@ if st.session_state.get("menu_atual") not in menu_options:
     st.session_state.menu_atual = menu_options[0]
 
 menu = st.session_state.menu_atual
-atualizar_menu_sessao(st.session_state.get("token_sessao"), menu)
+token = st.session_state.get("token_sessao")
+if token:
+    atualizar_menu_sessao(token, menu)
 persistir_query_params()
 
 
