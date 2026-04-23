@@ -157,7 +157,7 @@ def obter_email_config():
         "user": (cfg.get("user") or os.getenv("SMTP_USER") or "").strip(),
         "password": (cfg.get("password") or os.getenv("SMTP_PASSWORD") or "").strip(),
         "from_name": (
-            cfg.get("from_name") or os.getenv("SMTP_FROM_NAME") or "Portal Arati"
+            cfg.get("from_name") or os.getenv("SMTP_FROM_NAME") or "Gestão RH"
         ).strip(),
         "from_email": (
             cfg.get("from_email") or os.getenv("SMTP_FROM_EMAIL") or ""
@@ -274,7 +274,7 @@ def enviar_email_convite(destinatario, nome, link):
     ):
         return False, "Configuração de e-mail não encontrada em st.secrets['email']."
 
-    assunto = "Convite - Portal Arati"
+    assunto = "Convite - Gestão RH"
 
     html_body = f"""
 <html>
@@ -304,7 +304,7 @@ def enviar_email_convite(destinatario, nome, link):
             <tr>
               <td align="center" style="color:#cfe3ff; font-size:14px; padding-top:15px;">
                 Olá, {nome}.<br><br>
-                Você recebeu um convite para concluir seu cadastro no Portal Arati.
+                Você recebeu um convite para concluir seu cadastro no Gestão RH.
               </td>
             </tr>
 
@@ -342,7 +342,7 @@ def enviar_email_convite(destinatario, nome, link):
             <!-- RODAPÉ -->
             <tr>
               <td align="center" style="color:#7ea6d9; font-size:12px;">
-                Portal Arati<br>
+                Gestão RH<br>
                 Plataforma de gestão de pessoas<br><br>
                 Este e-mail foi enviado automaticamente.
               </td>
@@ -782,6 +782,57 @@ def criar_tabelas():
         """
     )
 
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tipos_documento_sst (
+            id BIGSERIAL PRIMARY KEY,
+            codigo TEXT NOT NULL UNIQUE,
+            nome TEXT NOT NULL,
+            escopo TEXT NOT NULL,
+            periodicidade_meses INTEGER,
+            exige_revisao_por_evento BOOLEAN DEFAULT FALSE,
+            ativo BOOLEAN DEFAULT TRUE
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS documentos_sst (
+            id BIGSERIAL PRIMARY KEY,
+            empresa_id BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+            filial_id BIGINT REFERENCES filiais(id) ON DELETE SET NULL,
+            colaborador_id BIGINT REFERENCES colaboradores(id) ON DELETE SET NULL,
+            tipo_documento_id BIGINT NOT NULL REFERENCES tipos_documento_sst(id),
+            titulo TEXT NOT NULL,
+            data_emissao DATE,
+            data_vencimento DATE,
+            status TEXT DEFAULT 'Vigente',
+            observacao TEXT,
+            arquivo_nome TEXT,
+            arquivo BYTEA,
+            revisao_necessaria BOOLEAN DEFAULT FALSE,
+            criado_por BIGINT REFERENCES usuarios(id),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS eventos_revisao_sst (
+            id BIGSERIAL PRIMARY KEY,
+            empresa_id BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+            filial_id BIGINT REFERENCES filiais(id) ON DELETE SET NULL,
+            tipo_evento TEXT NOT NULL,
+            descricao TEXT,
+            data_evento DATE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
     if not coluna_existe("filiais", "licenca"):
         conn.execute("ALTER TABLE filiais ADD COLUMN licenca TEXT")
     if not coluna_existe("filiais", "empresa_id"):
@@ -799,6 +850,46 @@ def criar_tabelas():
     if not coluna_existe("colaboradores", "empresa_id"):
         conn.execute(
             "ALTER TABLE colaboradores ADD COLUMN empresa_id BIGINT REFERENCES empresas(id)"
+        )
+
+    if not coluna_existe("documentos_sst", "revisao_necessaria"):
+        conn.execute(
+            "ALTER TABLE documentos_sst ADD COLUMN revisao_necessaria BOOLEAN DEFAULT FALSE"
+        )
+    if not coluna_existe("documentos_sst", "criado_por"):
+        conn.execute(
+            "ALTER TABLE documentos_sst ADD COLUMN criado_por BIGINT REFERENCES usuarios(id)"
+        )
+    if not coluna_existe("documentos_sst", "updated_at"):
+        conn.execute(
+            "ALTER TABLE documentos_sst ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        )
+
+    tipos_sst_padrao = [
+        ("PGR", "Programa de Gerenciamento de Riscos", "empresa", 24, True),
+        ("PCMSO_RA", "PCMSO - Relatório Analítico", "empresa", 12, False),
+        ("LTCAT", "LTCAT", "empresa", 24, False),
+        ("PERICULOSIDADE", "Laudo de Periculosidade", "empresa", 24, False),
+        ("INSALUBRIDADE", "Laudo de Insalubridade", "empresa", 24, False),
+        ("AET", "Análise Ergonômica do Trabalho", "empresa", 24, True),
+        ("PAE", "Plano de Atendimento à Emergência", "empresa", 12, False),
+        ("ASO_PERIODICO", "ASO Periódico", "colaborador", 12, False),
+    ]
+
+    for codigo, nome, escopo, periodicidade_meses, exige_revisao in tipos_sst_padrao:
+        conn.execute(
+            """
+            INSERT INTO tipos_documento_sst
+            (codigo, nome, escopo, periodicidade_meses, exige_revisao_por_evento, ativo)
+            VALUES (%s, %s, %s, %s, %s, TRUE)
+            ON CONFLICT (codigo) DO UPDATE
+            SET nome = EXCLUDED.nome,
+                escopo = EXCLUDED.escopo,
+                periodicidade_meses = EXCLUDED.periodicidade_meses,
+                exige_revisao_por_evento = EXCLUDED.exige_revisao_por_evento,
+                ativo = TRUE
+            """,
+            (codigo, nome, escopo, periodicidade_meses, exige_revisao),
         )
 
     if not coluna_existe("clientes", "cpf"):
@@ -860,7 +951,7 @@ def criar_tabelas():
         conn.execute("ALTER TABLE convites_cadastro ADD COLUMN usuario_sugerido TEXT")
 
 
-RUN_DB_BOOTSTRAP = os.getenv("RUN_DB_BOOTSTRAP", "false").lower() == "true"
+RUN_DB_BOOTSTRAP = os.getenv("RUN_DB_BOOTSTRAP", "true").lower() == "true"
 if RUN_DB_BOOTSTRAP:
     criar_tabelas()
 
@@ -1951,26 +2042,6 @@ def render_tela_convite(token_convite):
         st.stop()
 
 
-def calcular_data_vencimento(data_emissao, periodicidade_meses):
-    if not data_emissao or not periodicidade_meses:
-        return None
-    data_base = pd.Timestamp(data_emissao)
-    return (data_base + pd.DateOffset(months=int(periodicidade_meses))).date()
-
-
-def classificar_status_vencimento(data_vencimento):
-    if not data_vencimento:
-        return "Sem vencimento"
-    hoje = agora().date()
-    dias = (data_vencimento - hoje).days
-
-    if dias < 0:
-        return "Vencido"
-    if dias <= 30:
-        return "A vencer"
-    return "Vigente"
-
-
 def render_tela_convite(token_convite):
     aplicar_estilo_login()
 
@@ -2465,11 +2536,13 @@ def render_sidebar_menu(menu_options, current_menu, logo_b64):
         "Cadastro de Filiais": "clientes",
         "Cadastro de Setores": "cadastros",
         "Cadastro de Cargos": "atendentes",
+        "Documentos SST": "cadastros",
+        "Vencimentos SST": "dashboard",
     }
 
     if logo_b64:
         st.markdown(
-            f'<div class="bv-sidebar-top"><img class="bv-sidebar-logo" src="data:image/png;base64,{logo_b64}"><div class="bv-sidebar-title">Portal Arati</div></div>',
+            f'<div class="bv-sidebar-top"><img class="bv-sidebar-logo" src="data:image/png;base64,{logo_b64}"><div class="bv-sidebar-title">Gestão RH</div></div>',
             unsafe_allow_html=True,
         )
 
@@ -2515,7 +2588,7 @@ with header_logo_col:
 
 with header_title_col:
     st.markdown(
-        "<h1 style='margin-bottom:0;'>Portal Arati</h1>",
+        "<h1 style='margin-bottom:0;'>Gestão RH</h1>",
         unsafe_allow_html=True,
     )
 
@@ -3332,6 +3405,26 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         c4.metric("Desligamentos no período", desligamentos_periodo)
         c5.metric("Turnover", f"{turnover:.2f}%")
         c6.metric("Afastados", afastados_total)
+
+        atualizar_status_documentos_sst_empresa(empresa_id)
+        docs_sst = conn.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'Vencido') AS vencidos,
+                COUNT(*) FILTER (WHERE status = 'A vencer') AS a_vencer,
+                COUNT(*) FILTER (WHERE status = 'Revisão necessária') AS revisao_necessaria
+            FROM documentos_sst
+            WHERE empresa_id = %s
+            """,
+            (empresa_id,),
+        ).fetchone()
+
+        d1, d2, d3 = st.columns(3)
+        d1.metric("SST vencidos", int((docs_sst or {}).get("vencidos") or 0))
+        d2.metric("SST a vencer (30 dias)", int((docs_sst or {}).get("a_vencer") or 0))
+        d3.metric(
+            "SST em revisão", int((docs_sst or {}).get("revisao_necessaria") or 0)
+        )
 
         st.markdown("---")
 
@@ -4386,6 +4479,496 @@ elif menu == "Quadro de Funcionários" and perfil_atual in ("admin", "gestor"):
             ],
             use_container_width=True,
         )
+
+
+elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
+    exigir_perfil("admin", "gestor")
+    st.header("Documentos SST")
+    empresa_id = get_empresa_id()
+    atualizar_status_documentos_sst_empresa(empresa_id)
+
+    tipos_documento = conn.execute(
+        """
+        SELECT id, codigo, nome, escopo, periodicidade_meses, exige_revisao_por_evento
+        FROM tipos_documento_sst
+        WHERE ativo = TRUE
+        ORDER BY nome
+        """
+    ).fetchall()
+    mapa_tipos = {row["nome"]: row for row in tipos_documento}
+
+    filiais = conn.execute(
+        "SELECT id, nome FROM filiais WHERE empresa_id = %s AND ativo = TRUE ORDER BY nome",
+        (empresa_id,),
+    ).fetchall()
+    colaboradores = conn.execute(
+        """
+        SELECT id, nome, matricula
+        FROM colaboradores
+        WHERE empresa_id = %s
+        ORDER BY nome
+        """,
+        (empresa_id,),
+    ).fetchall()
+
+    with st.expander("Novo documento", expanded=True):
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            tipo_nome = st.selectbox(
+                "Tipo de documento",
+                list(mapa_tipos.keys()) if mapa_tipos else [],
+                key="sst_tipo_documento",
+            )
+            titulo_documento = st.text_input("Título", key="sst_titulo")
+            data_emissao = st.date_input(
+                "Data de emissão",
+                key="sst_data_emissao",
+                value=datetime.now().date(),
+            )
+
+        tipo_selecionado = mapa_tipos.get(tipo_nome) if mapa_tipos else None
+        periodicidade = (
+            tipo_selecionado["periodicidade_meses"] if tipo_selecionado else None
+        )
+        escopo_tipo = tipo_selecionado["escopo"] if tipo_selecionado else "empresa"
+        data_vencimento_calculada = calcular_data_vencimento_documento(
+            data_emissao,
+            periodicidade,
+        )
+
+        with c2:
+            filial_labels = ["Empresa / Geral"] + [row["nome"] for row in filiais]
+            filial_nome_sel = st.selectbox(
+                "Filial",
+                filial_labels,
+                key="sst_filial",
+            )
+            filial_id_sel = None
+            if filial_nome_sel != "Empresa / Geral":
+                filial_id_sel = next(
+                    row["id"] for row in filiais if row["nome"] == filial_nome_sel
+                )
+
+            colaborador_id_sel = None
+            if escopo_tipo == "colaborador":
+                colab_labels = [
+                    f"{row['nome']} ({row['matricula'] or 'Sem matrícula'})"
+                    for row in colaboradores
+                ]
+                if colab_labels:
+                    colab_sel = st.selectbox(
+                        "Colaborador",
+                        colab_labels,
+                        key="sst_colaborador",
+                    )
+                    colaborador_id_sel = colaboradores[colab_labels.index(colab_sel)][
+                        "id"
+                    ]
+                else:
+                    st.warning(
+                        "Cadastre colaboradores para usar documentos com escopo de colaborador."
+                    )
+            else:
+                st.text_input(
+                    "Colaborador",
+                    value="Não aplicável para este tipo",
+                    disabled=True,
+                    key="sst_colaborador_info",
+                )
+
+        with c3:
+            st.text_input(
+                "Periodicidade",
+                value=(
+                    f"{periodicidade} meses"
+                    if periodicidade
+                    else "Sem vencimento automático"
+                ),
+                disabled=True,
+                key="sst_periodicidade_info",
+            )
+            st.text_input(
+                "Vencimento calculado",
+                value=(
+                    data_vencimento_calculada.strftime("%d/%m/%Y")
+                    if data_vencimento_calculada
+                    else "Não calculado"
+                ),
+                disabled=True,
+                key="sst_vencimento_calculado",
+            )
+            revisao_manual = st.checkbox(
+                "Marcar revisão necessária",
+                value=False,
+                key="sst_revisao_manual",
+            )
+
+        observacao = st.text_area("Observação", key="sst_observacao")
+        arquivo_sst = st.file_uploader(
+            "Anexar documento",
+            type=["pdf", "png", "jpg", "jpeg"],
+            key="sst_arquivo",
+        )
+
+        if st.button("Cadastrar documento SST", key="btn_cadastrar_documento_sst"):
+            if not tipo_selecionado:
+                st.error("Selecione o tipo de documento.")
+            elif not titulo_documento.strip():
+                st.error("Informe o título do documento.")
+            elif escopo_tipo == "colaborador" and not colaborador_id_sel:
+                st.error("Selecione o colaborador para este documento.")
+            else:
+                arquivo_nome = None
+                arquivo_bytes = None
+
+                if arquivo_sst is not None:
+                    ok, msg = validar_upload_documento_sst(arquivo_sst)
+                    if not ok:
+                        st.error(msg)
+                        st.stop()
+                    arquivo_nome = arquivo_sst.name
+                    arquivo_bytes = arquivo_sst.getvalue()
+
+                status_documento = classificar_status_vencimento(
+                    data_vencimento_calculada,
+                    revisao_manual,
+                )
+
+                conn.execute(
+                    """
+                    INSERT INTO documentos_sst
+                    (
+                        empresa_id,
+                        filial_id,
+                        colaborador_id,
+                        tipo_documento_id,
+                        titulo,
+                        data_emissao,
+                        data_vencimento,
+                        status,
+                        observacao,
+                        arquivo_nome,
+                        arquivo,
+                        revisao_necessaria,
+                        criado_por,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        empresa_id,
+                        filial_id_sel,
+                        colaborador_id_sel,
+                        tipo_selecionado["id"],
+                        titulo_documento.strip(),
+                        data_emissao,
+                        data_vencimento_calculada,
+                        status_documento,
+                        observacao.strip(),
+                        arquivo_nome,
+                        arquivo_bytes,
+                        revisao_manual,
+                        get_user_id(),
+                        agora(),
+                        agora(),
+                    ),
+                )
+                st.success("Documento SST cadastrado com sucesso.")
+                st.rerun()
+
+    st.markdown("---")
+    st.subheader("Eventos que exigem revisão")
+    with st.expander("Registrar evento de revisão", expanded=False):
+        ev1, ev2, ev3 = st.columns(3)
+        with ev1:
+            tipo_evento = st.selectbox(
+                "Tipo de evento",
+                ["mudança_layout", "nova_atividade", "mudança_processo"],
+                key="sst_tipo_evento",
+            )
+        with ev2:
+            filial_evento_labels = ["Empresa / Geral"] + [
+                row["nome"] for row in filiais
+            ]
+            filial_evento_nome = st.selectbox(
+                "Filial do evento",
+                filial_evento_labels,
+                key="sst_evento_filial",
+            )
+        with ev3:
+            data_evento = st.date_input(
+                "Data do evento",
+                key="sst_evento_data",
+                value=datetime.now().date(),
+            )
+
+        descricao_evento = st.text_area(
+            "Descrição do evento", key="sst_evento_descricao"
+        )
+
+        if st.button("Registrar evento", key="btn_registrar_evento_sst"):
+            filial_evento_id = None
+            if filial_evento_nome != "Empresa / Geral":
+                filial_evento_id = next(
+                    row["id"] for row in filiais if row["nome"] == filial_evento_nome
+                )
+
+            if not descricao_evento.strip():
+                st.error("Descreva o evento.")
+            else:
+                registrar_evento_revisao_sst(
+                    empresa_id=empresa_id,
+                    filial_id=filial_evento_id,
+                    tipo_evento=tipo_evento,
+                    descricao=descricao_evento,
+                    data_evento=data_evento,
+                )
+
+                conn.execute(
+                    """
+                    UPDATE documentos_sst d
+                    SET revisao_necessaria = TRUE,
+                        status = 'Revisão necessária',
+                        updated_at = %s
+                    FROM tipos_documento_sst t
+                    WHERE d.tipo_documento_id = t.id
+                      AND d.empresa_id = %s
+                      AND t.exige_revisao_por_evento = TRUE
+                      AND (%s IS NULL OR d.filial_id = %s OR d.filial_id IS NULL)
+                    """,
+                    (agora(), empresa_id, filial_evento_id, filial_evento_id),
+                )
+
+                st.success(
+                    "Evento registrado e documentos elegíveis marcados para revisão."
+                )
+                st.rerun()
+
+    st.markdown("---")
+    st.subheader("Documentos cadastrados")
+
+    filtro1, filtro2, filtro3 = st.columns(3)
+    with filtro1:
+        filtro_status_sst = st.selectbox(
+            "Status",
+            [
+                "Todos",
+                "Vigente",
+                "A vencer",
+                "Vencido",
+                "Revisão necessária",
+                "Sem vencimento",
+            ],
+            key="filtro_status_sst",
+        )
+    with filtro2:
+        filtro_tipo_sst = st.selectbox(
+            "Tipo",
+            ["Todos"] + list(mapa_tipos.keys()),
+            key="filtro_tipo_sst",
+        )
+    with filtro3:
+        filtro_filial_sst = st.selectbox(
+            "Filial",
+            ["Todas"] + [row["nome"] for row in filiais],
+            key="filtro_filial_sst",
+        )
+
+    documentos = conn.execute(
+        """
+        SELECT
+            d.id,
+            d.titulo,
+            d.data_emissao,
+            d.data_vencimento,
+            d.status,
+            d.observacao,
+            d.arquivo_nome,
+            d.revisao_necessaria,
+            t.nome AS tipo_documento,
+            t.escopo,
+            f.nome AS filial_nome,
+            c.nome AS colaborador_nome
+        FROM documentos_sst d
+        JOIN tipos_documento_sst t ON t.id = d.tipo_documento_id
+        LEFT JOIN filiais f ON f.id = d.filial_id
+        LEFT JOIN colaboradores c ON c.id = d.colaborador_id
+        WHERE d.empresa_id = %s
+        ORDER BY d.data_vencimento NULLS LAST, d.id DESC
+        """,
+        (empresa_id,),
+    ).fetchall()
+
+    docs_filtrados = []
+    for doc in documentos:
+        if filtro_status_sst != "Todos" and doc["status"] != filtro_status_sst:
+            continue
+        if filtro_tipo_sst != "Todos" and doc["tipo_documento"] != filtro_tipo_sst:
+            continue
+        filial_nome_doc = doc.get("filial_nome") or "Empresa / Geral"
+        if filtro_filial_sst != "Todas" and filial_nome_doc != filtro_filial_sst:
+            continue
+        docs_filtrados.append(doc)
+
+    if docs_filtrados:
+        docs_filtrados, _, _ = paginar_registros(
+            docs_filtrados,
+            "pagina_documentos_sst",
+            page_size=10,
+        )
+        for doc in docs_filtrados:
+            doc_id = doc["id"]
+            with st.container(border=True):
+                c1, c2, c3, c4 = st.columns([2.4, 1.2, 1.2, 1.5])
+                with c1:
+                    st.write(f"**{doc['titulo']}**")
+                    st.caption(doc["tipo_documento"])
+                    st.caption(
+                        f"Filial: {doc.get('filial_nome') or 'Empresa / Geral'}"
+                        + (
+                            f" • Colaborador: {doc.get('colaborador_nome')}"
+                            if doc.get("colaborador_nome")
+                            else ""
+                        )
+                    )
+                with c2:
+                    st.write(
+                        f"Emissão: {doc['data_emissao'].strftime('%d/%m/%Y') if doc.get('data_emissao') else '-'}"
+                    )
+                    st.caption(
+                        f"Vencimento: {doc['data_vencimento'].strftime('%d/%m/%Y') if doc.get('data_vencimento') else '-'}"
+                    )
+                with c3:
+                    st.write(f"Status: **{doc['status']}**")
+                    st.caption(
+                        "Revisão pendente"
+                        if doc.get("revisao_necessaria")
+                        else "Sem revisão pendente"
+                    )
+                with c4:
+                    a1, a2 = st.columns(2)
+                    with a1:
+                        if st.button(
+                            "Baixar",
+                            key=f"baixar_sst_{doc_id}",
+                            use_container_width=True,
+                        ):
+                            pass
+                    with a2:
+                        if st.button(
+                            "Excluir",
+                            key=f"excluir_sst_{doc_id}",
+                            use_container_width=True,
+                        ):
+                            conn.execute(
+                                "DELETE FROM documentos_sst WHERE id = %s AND empresa_id = %s",
+                                (doc_id, empresa_id),
+                            )
+                            st.success("Documento excluído.")
+                            st.rerun()
+
+                if doc.get("observacao"):
+                    st.caption(doc["observacao"])
+
+                render_documento_sst_arquivo(doc_id, prefixo="sst_download")
+    else:
+        st.info("Nenhum documento SST encontrado com os filtros aplicados.")
+
+elif menu == "Vencimentos SST" and perfil_atual in ("admin", "gestor"):
+    exigir_perfil("admin", "gestor")
+    st.header("Vencimentos SST")
+    empresa_id = get_empresa_id()
+    atualizar_status_documentos_sst_empresa(empresa_id)
+
+    resumo = conn.execute(
+        """
+        SELECT
+            COUNT(*) FILTER (WHERE status = 'Vencido') AS vencidos,
+            COUNT(*) FILTER (WHERE status = 'A vencer') AS a_vencer,
+            COUNT(*) FILTER (WHERE status = 'Revisão necessária') AS revisao,
+            COUNT(*) FILTER (WHERE status = 'Vigente') AS vigentes
+        FROM documentos_sst
+        WHERE empresa_id = %s
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Vencidos", int((resumo or {}).get("vencidos") or 0))
+    r2.metric("A vencer em 30 dias", int((resumo or {}).get("a_vencer") or 0))
+    r3.metric("Em revisão", int((resumo or {}).get("revisao") or 0))
+    r4.metric("Vigentes", int((resumo or {}).get("vigentes") or 0))
+
+    tabela = conn.execute(
+        """
+        SELECT
+            d.id,
+            t.nome AS tipo_documento,
+            d.titulo,
+            f.nome AS filial_nome,
+            c.nome AS colaborador_nome,
+            d.data_emissao,
+            d.data_vencimento,
+            d.status
+        FROM documentos_sst d
+        JOIN tipos_documento_sst t ON t.id = d.tipo_documento_id
+        LEFT JOIN filiais f ON f.id = d.filial_id
+        LEFT JOIN colaboradores c ON c.id = d.colaborador_id
+        WHERE d.empresa_id = %s
+        ORDER BY
+            CASE d.status
+                WHEN 'Vencido' THEN 1
+                WHEN 'A vencer' THEN 2
+                WHEN 'Revisão necessária' THEN 3
+                WHEN 'Vigente' THEN 4
+                ELSE 5
+            END,
+            d.data_vencimento NULLS LAST,
+            d.id DESC
+        """,
+        (empresa_id,),
+    ).fetchall()
+
+    if tabela:
+        df_sst = pd.DataFrame(tabela)
+        for coluna in ["data_emissao", "data_vencimento"]:
+            if coluna in df_sst.columns:
+                df_sst[coluna] = pd.to_datetime(
+                    df_sst[coluna], errors="coerce"
+                ).dt.strftime("%d/%m/%Y")
+                df_sst[coluna] = df_sst[coluna].fillna("-")
+        df_sst = df_sst.rename(
+            columns={
+                "tipo_documento": "Tipo",
+                "titulo": "Título",
+                "filial_nome": "Filial",
+                "colaborador_nome": "Colaborador",
+                "data_emissao": "Emissão",
+                "data_vencimento": "Vencimento",
+                "status": "Status",
+            }
+        )
+        df_sst["Filial"] = df_sst["Filial"].fillna("Empresa / Geral")
+        df_sst["Colaborador"] = df_sst["Colaborador"].fillna("-")
+        st.dataframe(
+            df_sst[
+                [
+                    "Tipo",
+                    "Título",
+                    "Filial",
+                    "Colaborador",
+                    "Emissão",
+                    "Vencimento",
+                    "Status",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info("Nenhum documento SST cadastrado ainda.")
 
 elif menu == "Cadastro de Atendentes" and perfil_atual == "admin":
     st.header("Cadastro de Atendentes")
