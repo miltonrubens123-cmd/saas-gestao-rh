@@ -20,6 +20,7 @@ import streamlit as st
 from PIL import Image
 from psycopg.rows import dict_row
 from zoneinfo import ZoneInfo
+import time
 
 
 @st.cache_resource
@@ -143,6 +144,71 @@ def obter_secret(path, default=None):
         return cursor
     except Exception:
         return default
+
+
+def obter_arquivo_documento(doc_id, empresa_id):
+    return conn.execute(
+        """
+        SELECT arquivo, arquivo_nome
+        FROM documentos_sst
+        WHERE id = %s AND empresa_id = %s
+        """,
+        (doc_id, empresa_id),
+    ).fetchone()
+
+
+def listar_documentos_sst(empresa_id, limite=20, offset=0):
+    return conn.execute(
+        """
+        SELECT
+            d.id,
+            d.titulo,
+            d.data_emissao,
+            d.data_vencimento,
+            d.status,
+            d.arquivo_nome,
+            td.nome AS tipo_documento,
+            td.escopo,
+            c.nome AS colaborador_nome,
+            c.matricula,
+            f.nome AS filial_nome
+        FROM documentos_sst d
+        JOIN tipos_documento_sst td ON td.id = d.tipo_documento_id
+        LEFT JOIN colaboradores c ON c.id = d.colaborador_id
+        LEFT JOIN filiais f ON f.id = d.filial_id
+        WHERE d.empresa_id = %s
+        ORDER BY d.id DESC
+        LIMIT %s OFFSET %s
+        """,
+        (empresa_id, limite, offset),
+    ).fetchall()
+
+
+@st.cache_data(ttl=30)
+def listar_documentos_sst_resumo(empresa_id):
+    return conn.execute(
+        """
+        SELECT
+            d.id,
+            d.titulo,
+            d.data_emissao,
+            d.data_vencimento,
+            d.status,
+            d.arquivo_nome,
+            td.nome AS tipo_documento,
+            td.escopo,
+            c.nome AS colaborador_nome,
+            c.matricula,
+            f.nome AS filial_nome
+        FROM documentos_sst d
+        JOIN tipos_documento_sst td ON td.id = d.tipo_documento_id
+        LEFT JOIN colaboradores c ON c.id = d.colaborador_id
+        LEFT JOIN filiais f ON f.id = d.filial_id
+        WHERE d.empresa_id = %s
+        ORDER BY d.id DESC
+        """,
+        (empresa_id,),
+    ).fetchall()
 
 
 def obter_app_base_url():
@@ -4673,13 +4739,21 @@ elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
     empresa_id = get_empresa_id()
     # atualizar_status_documentos_sst_empresa(empresa_id)
 
+    t0 = time.perf_counter()
     tipos_documento = listar_tipos_documento_sst()
-    mapa_tipos = (
-        {row["nome"]: dict(row) for row in tipos_documento} if tipos_documento else {}
-    )
+    t1 = time.perf_counter()
+
+    mapa_tipos = {row["nome"]: row for row in tipos_documento}
 
     filiais = listar_filiais_ativas(empresa_id)
+    t2 = time.perf_counter()
+
     colaboradores = listar_colaboradores_ativos(empresa_id)
+    t3 = time.perf_counter()
+
+    st.caption(
+        f"Tipos: {t1-t0:.3f}s | Filiais: {t2-t1:.3f}s | Colaboradores: {t3-t2:.3f}s"
+    )
 
     with st.expander("Novo documento", expanded=True):
         c1, c2, c3 = st.columns(3)
@@ -4847,6 +4921,7 @@ elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
                     ),
                 )
                 # ✅ LIMPA CACHE AQUI
+                listar_documentos_sst_resumo.clear()
                 listar_tipos_documento_sst.clear()
                 listar_filiais_ativas.clear()
                 listar_colaboradores_ativos.clear()
