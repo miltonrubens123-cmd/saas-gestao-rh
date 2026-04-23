@@ -157,7 +157,7 @@ def obter_email_config():
         "user": (cfg.get("user") or os.getenv("SMTP_USER") or "").strip(),
         "password": (cfg.get("password") or os.getenv("SMTP_PASSWORD") or "").strip(),
         "from_name": (
-            cfg.get("from_name") or os.getenv("SMTP_FROM_NAME") or "Gestão RH"
+            cfg.get("from_name") or os.getenv("SMTP_FROM_NAME") or "Portal Arati"
         ).strip(),
         "from_email": (
             cfg.get("from_email") or os.getenv("SMTP_FROM_EMAIL") or ""
@@ -237,7 +237,7 @@ def autenticar_usuario(login_digitado, senha_digitada):
 def registrar_sessao_usuario(usuario, menu_inicial=None):
     perfil = usuario["perfil"]
     menu_padrao = menu_inicial or (
-        "Dashboard RH" if perfil in ("admin", "gestor", "superadmin", "operador") else "Nova Solicitação"
+        "Dashboard RH" if perfil in ("admin", "gestor") else "Nova Solicitação"
     )
     token = criar_sessao_login(
         usuario=usuario["usuario"],
@@ -274,7 +274,7 @@ def enviar_email_convite(destinatario, nome, link):
     ):
         return False, "Configuração de e-mail não encontrada em st.secrets['email']."
 
-    assunto = "Convite - Gestão RH"
+    assunto = "Convite - Portal Arati"
 
     html_body = f"""
 <html>
@@ -304,7 +304,7 @@ def enviar_email_convite(destinatario, nome, link):
             <tr>
               <td align="center" style="color:#cfe3ff; font-size:14px; padding-top:15px;">
                 Olá, {nome}.<br><br>
-                Você recebeu um convite para concluir seu cadastro no Gestão RH.
+                Você recebeu um convite para concluir seu cadastro no Portal Arati.
               </td>
             </tr>
 
@@ -342,7 +342,7 @@ def enviar_email_convite(destinatario, nome, link):
             <!-- RODAPÉ -->
             <tr>
               <td align="center" style="color:#7ea6d9; font-size:12px;">
-                Gestão RH<br>
+                Portal Arati<br>
                 Plataforma de gestão de pessoas<br><br>
                 Este e-mail foi enviado automaticamente.
               </td>
@@ -997,7 +997,7 @@ def restaurar_login():
     st.session_state.plano = usuario.get("plano") or ""
     st.session_state.menu_atual = sessao["menu"] or (
         "Dashboard RH"
-        if usuario["perfil"] in ("admin", "gestor", "superadmin", "operador")
+        if usuario["perfil"] in ("admin", "gestor")
         else "Nova Solicitação"
     )
     st.session_state.token_sessao = token
@@ -1483,7 +1483,7 @@ def reenviar_convite(convite_id):
 def concluir_convite(
     convite, nome, usuario, senha, cpf="", funcao="", email="", nome_atendente=""
 ):
-    tipo = (convite["tipo_usuario"] or "").strip().lower()
+    tipo = convite["tipo_usuario"]
 
     if tipo == "cliente":
         existe = conn.execute(
@@ -1508,41 +1508,13 @@ def concluir_convite(
                 email.strip().lower(),
             ),
         )
-    elif tipo in ("admin", "gestor", "usuario", "superadmin", "operador"):
-        existe = conn.execute(
-            """
-            SELECT 1
-            FROM usuarios
-            WHERE empresa_id = %s
-              AND (usuario = %s OR email = %s)
-            LIMIT 1
-            """,
-            (convite["empresa_id"], usuario, email.strip().lower()),
-        ).fetchone()
-        if existe:
-            raise ValueError("Já existe um usuário com esse usuário ou e-mail nesta empresa.")
-
-        conn.execute(
-            """
-            INSERT INTO usuarios (empresa_id, nome, email, usuario, senha_hash, perfil, ativo)
-            VALUES (%s, %s, %s, %s, %s, %s, TRUE)
-            """,
-            (
-                convite["empresa_id"],
-                nome,
-                email.strip().lower(),
-                usuario,
-                gerar_hash_senha(senha),
-                tipo,
-            ),
-        )
     else:
         existe = conn.execute(
             "SELECT 1 FROM atendentes WHERE usuario = %s",
             (usuario,),
         ).fetchone()
         if existe:
-            raise ValueError("Já existe um operador com esse usuário.")
+            raise ValueError("Já existe um atendente com esse usuário.")
 
         conn.execute(
             """
@@ -1566,6 +1538,7 @@ def concluir_convite(
         """,
         (agora(), convite["id"]),
     )
+
 
 def aplicar_estilo_login():
     st.markdown(
@@ -2452,17 +2425,11 @@ def render_sidebar_menu(menu_options, current_menu, logo_b64):
         "Cadastro de Filiais": "clientes",
         "Cadastro de Setores": "cadastros",
         "Cadastro de Cargos": "atendentes",
-        "Documentos SST": "cadastros",
-        "Vencimentos SST": "dashboard",
-        "Cadastro de Clientes": "clientes",
-        "Cadastro de Empresas": "clientes",
-        "Cadastro de Operadores": "atendentes",
-        "Painel de Cadastros": "cadastros",
     }
 
     if logo_b64:
         st.markdown(
-            f'<div class="bv-sidebar-top"><img class="bv-sidebar-logo" src="data:image/png;base64,{logo_b64}"><div class="bv-sidebar-title">Gestão RH</div></div>',
+            f'<div class="bv-sidebar-top"><img class="bv-sidebar-logo" src="data:image/png;base64,{logo_b64}"><div class="bv-sidebar-title">Portal Arati</div></div>',
             unsafe_allow_html=True,
         )
 
@@ -2508,7 +2475,7 @@ with header_logo_col:
 
 with header_title_col:
     st.markdown(
-        "<h1 style='margin-bottom:0;'>Gestão RH</h1>",
+        "<h1 style='margin-bottom:0;'>Portal Arati</h1>",
         unsafe_allow_html=True,
     )
 
@@ -3198,8 +3165,8 @@ elif menu == "Demandas Solicitadas":
         st.info("Nenhuma solicitação encontrada com os filtros aplicados.")
 
 
-elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor", "superadmin", "operador"):
-    exigir_perfil("admin", "gestor", "superadmin", "operador")
+elif menu == "Dashboard RH" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Painel RH")
 
     empresa_id = get_empresa_id()
@@ -3380,8 +3347,8 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor", "superadmin"
                 tabela_aniversariantes, use_container_width=True, hide_index=True
             )
 
-elif menu == "Cadastro de Filiais" and perfil_atual in ("admin", "gestor", "superadmin", "operador"):
-    exigir_perfil("admin", "gestor", "superadmin", "operador")
+elif menu == "Cadastro de Filiais" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Cadastro de Filiais")
     empresa_id = get_empresa_id()
 
@@ -3568,8 +3535,8 @@ elif menu == "Cadastro de Filiais" and perfil_atual in ("admin", "gestor", "supe
     else:
         st.info("Nenhuma filial cadastrada ainda.")
 
-elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor", "superadmin", "operador"):
-    exigir_perfil("admin", "gestor", "superadmin", "operador")
+elif menu == "Cadastro de Colaboradores" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Cadastro de Colaboradores")
     empresa_id = get_empresa_id()
 
@@ -4051,8 +4018,8 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor",
     else:
         st.info("Nenhum colaborador cadastrado ainda.")
 
-elif menu == "Cadastro de Setores" and perfil_atual in ("admin", "gestor", "superadmin", "operador"):
-    exigir_perfil("admin", "gestor", "superadmin", "operador")
+elif menu == "Cadastro de Setores" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Cadastro de Setores")
     empresa_id = get_empresa_id()
 
@@ -4179,8 +4146,8 @@ elif menu == "Cadastro de Setores" and perfil_atual in ("admin", "gestor", "supe
     else:
         st.info("Nenhum setor cadastrado ainda.")
 
-elif menu == "Cadastro de Cargos" and perfil_atual in ("admin", "gestor", "superadmin", "operador"):
-    exigir_perfil("admin", "gestor", "superadmin", "operador")
+elif menu == "Cadastro de Cargos" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Cadastro de Cargos")
     empresa_id = get_empresa_id()
 
@@ -4306,8 +4273,8 @@ elif menu == "Cadastro de Cargos" and perfil_atual in ("admin", "gestor", "super
     else:
         st.info("Nenhum cargo cadastrado ainda.")
 
-elif menu == "Quadro de Funcionários" and perfil_atual in ("admin", "gestor", "superadmin", "operador"):
-    exigir_perfil("admin", "gestor", "superadmin", "operador")
+elif menu == "Quadro de Funcionários" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Quadro de Funcionários")
     empresa_id = get_empresa_id()
 
@@ -4598,3 +4565,160 @@ elif menu == "Cadastro de Atendentes" and perfil_atual == "admin":
         st.info("Nenhum atendente cadastrado ainda.")
 
 
+elif menu == "Painel de Cadastros" and perfil_atual == "admin":
+    st.header("Painel de Cadastros")
+    st.caption(
+        "Pré-cadastro por convite com geração de link para conclusão pelo cliente ou atendente."
+    )
+
+    tab1, tab2, tab3 = st.tabs(["Novo convite", "Pendentes / enviados", "Concluídos"])
+
+    with tab1:
+        empresas = conn.execute(
+            "SELECT id, fantasia FROM empresas WHERE ativo = TRUE ORDER BY fantasia"
+        ).fetchall()
+        nome_convite = st.text_input("Nome", key="convite_nome")
+        email_convite = st.text_input("E-mail", key="convite_email")
+        tipo_convite = st.selectbox(
+            "Tipo de usuário", ["cliente", "atendente"], key="convite_tipo"
+        )
+        obs_convite = st.text_area("Observação", key="convite_obs")
+        empresa_id_convite = None
+
+        if empresas:
+            opcoes = ["Selecione"] + [row["fantasia"] for row in empresas]
+            empresa_nome = st.selectbox("Empresa", opcoes, key="convite_empresa")
+            if empresa_nome != "Selecione":
+                empresa_id_convite = next(
+                    row["id"] for row in empresas if row["fantasia"] == empresa_nome
+                )
+        else:
+            st.warning(
+                "Cadastre ao menos uma empresa ativa para usar o painel de convites."
+            )
+
+        if st.button("Gerar convite e link", key="criar_convite_btn"):
+            if not nome_convite.strip() or not email_convite.strip():
+                st.error("Preencha nome e e-mail.")
+            elif tipo_convite == "cliente" and not empresa_id_convite:
+                st.error("Selecione a empresa do cliente.")
+            else:
+                resultado_convite = criar_convite(
+                    nome=nome_convite,
+                    email=email_convite,
+                    empresa_id=empresa_id_convite,
+                    tipo_usuario=tipo_convite,
+                    observacao=obs_convite,
+                )
+                link = resultado_convite["link"]
+                if resultado_convite["email_enviado"]:
+                    st.success("Convite criado e enviado por e-mail com sucesso.")
+                else:
+                    st.warning(
+                        f"Convite criado, mas o e-mail não foi enviado. Motivo: {resultado_convite['email_msg']}"
+                    )
+                st.code(link, language="text")
+                st.session_state["ultimo_link_convite"] = link
+
+        ultimo_link = st.session_state.get("ultimo_link_convite")
+        if ultimo_link:
+            st.caption("Último link gerado")
+            st.code(ultimo_link, language="text")
+
+    with tab2:
+        convites = conn.execute(
+            """
+            SELECT c.*, e.fantasia AS empresa_nome
+            FROM convites_cadastro c
+            LEFT JOIN empresas e ON e.id = c.empresa_id
+            WHERE c.status IN ('pendente', 'enviado', 'expirado')
+            ORDER BY c.created_at DESC
+            """
+        ).fetchall()
+
+        if not convites:
+            st.info("Nenhum convite pendente/enviado.")
+        else:
+            for convite in convites:
+                link = montar_url_convite(convite["token"])
+                with st.container(border=True):
+                    c1, c2, c3, c4 = st.columns([2.4, 1.6, 1.4, 3.2])
+                    with c1:
+                        st.write(f"**{convite['nome']}**")
+                        st.caption(convite["email"])
+                    with c2:
+                        st.write(convite["tipo_usuario"].capitalize())
+                        st.caption(convite.get("empresa_nome") or "Sem empresa")
+                    with c3:
+                        st.write(convite["status"].capitalize())
+                        exp = (
+                            convite["expiracao_em"].strftime("%d/%m/%Y %H:%M")
+                            if convite["expiracao_em"]
+                            else "-"
+                        )
+                        st.caption(f"Expira em {exp}")
+                    with c4:
+                        a1, a2, a3 = st.columns(3)
+                        with a1:
+                            if st.button(
+                                "Reenviar",
+                                key=f"reenviar_convite_{convite['id']}",
+                                use_container_width=True,
+                            ):
+                                resultado_reenvio = reenviar_convite(convite["id"])
+                                st.session_state[f"link_convite_{convite['id']}"] = (
+                                    resultado_reenvio["link"]
+                                )
+                                if resultado_reenvio["email_enviado"]:
+                                    st.success(
+                                        "Convite reenviado por e-mail com novo link."
+                                    )
+                                else:
+                                    st.warning(
+                                        f"Convite renovado com novo link, mas o e-mail não foi enviado. Motivo: {resultado_reenvio['email_msg']}"
+                                    )
+                                st.rerun()
+                        with a2:
+                            if st.button(
+                                "Cancelar",
+                                key=f"cancelar_convite_{convite['id']}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE convites_cadastro SET status = 'cancelado' WHERE id = %s",
+                                    (convite["id"],),
+                                )
+                                st.success("Convite cancelado.")
+                                st.rerun()
+                        with a3:
+                            st.code(
+                                st.session_state.get(
+                                    f"link_convite_{convite['id']}", link
+                                ),
+                                language="text",
+                            )
+
+    with tab3:
+        concluidos = conn.execute(
+            """
+            SELECT c.*, e.fantasia AS empresa_nome
+            FROM convites_cadastro c
+            LEFT JOIN empresas e ON e.id = c.empresa_id
+            WHERE c.status = 'concluido'
+            ORDER BY c.utilizado_em DESC NULLS LAST, c.created_at DESC
+            """
+        ).fetchall()
+        if not concluidos:
+            st.info("Nenhum cadastro concluído ainda.")
+        else:
+            for convite in concluidos:
+                with st.container(border=True):
+                    st.write(f"**{convite['nome']}** • {convite['email']}")
+                    st.caption(
+                        f"Tipo: {convite['tipo_usuario'].capitalize()} • "
+                        f"Empresa: {convite.get('empresa_nome') or 'Sem empresa'} • "
+                        f"Concluído em: {convite['utilizado_em'].strftime('%d/%m/%Y %H:%M') if convite['utilizado_em'] else '-'}"
+                    )
+                    print(
+                        f"Convite ID {convite['id']} - Status: {convite['status']} - Criado em: {convite['created_at']}"
+                    )
