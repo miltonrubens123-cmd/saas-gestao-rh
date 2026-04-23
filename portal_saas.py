@@ -2596,7 +2596,7 @@ st.markdown(
     "<hr style='border:1px solid rgba(120,145,170,0.12); margin-top:0;'>",
     unsafe_allow_html=True,
 )
-st.caption("Gestão de demandas e acompanhamento em tempo real")
+st.caption("Gestão de Recursos Humanos orientada por dados para empresas modernas.")
 
 menu_options_admin = [
     "Dashboard RH",
