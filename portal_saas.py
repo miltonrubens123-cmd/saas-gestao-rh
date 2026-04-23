@@ -765,6 +765,50 @@ logo = carregar_logo()
 logo_b64 = carregar_logo_base64()
 
 
+def aplicar_estilo_login():
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background: linear-gradient(180deg, #061C33 0%, #0B3A63 100%);
+        }
+
+        section[data-testid="stSidebar"] {
+            display: none;
+        }
+
+        .block-container {
+            min-height: 100vh;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+            max-width: 100% !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+        }
+
+        .stTextInput label, .stSelectbox label {
+            color: #dfeaf5 !important;
+            font-weight: 600 !important;
+        }
+
+        .stTextInput > div > div > input {
+            background-color: rgba(255,255,255,0.06) !important;
+            color: white !important;
+            border: 1px solid rgba(173, 216, 255, 0.22) !important;
+            border-radius: 10px !important;
+        }
+
+        .stButton > button {
+            width: 100%;
+            border-radius: 12px;
+            font-weight: 700;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def agora():
     return datetime.now(APP_TZ)
 
