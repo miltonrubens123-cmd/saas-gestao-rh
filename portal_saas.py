@@ -1951,6 +1951,26 @@ def render_tela_convite(token_convite):
         st.stop()
 
 
+def calcular_data_vencimento(data_emissao, periodicidade_meses):
+    if not data_emissao or not periodicidade_meses:
+        return None
+    data_base = pd.Timestamp(data_emissao)
+    return (data_base + pd.DateOffset(months=int(periodicidade_meses))).date()
+
+
+def classificar_status_vencimento(data_vencimento):
+    if not data_vencimento:
+        return "Sem vencimento"
+    hoje = agora().date()
+    dias = (data_vencimento - hoje).days
+
+    if dias < 0:
+        return "Vencido"
+    if dias <= 30:
+        return "A vencer"
+    return "Vigente"
+
+
 def render_tela_convite(token_convite):
     aplicar_estilo_login()
 
@@ -2332,17 +2352,27 @@ def aplicar_design_portal():
         """
         <style>
         .stApp {
-            background: linear-gradient(180deg, #020b16 0%, #04111f 100%);
+            background:
+                radial-gradient(circle at top left, rgba(58, 28, 113, 0.18), transparent 28%),
+                radial-gradient(circle at bottom right, rgba(46, 125, 255, 0.10), transparent 24%),
+                linear-gradient(135deg, #031427 0%, #06264A 55%, #0B2F57 100%);
             color: #EAF2FF;
         }
-        [data-testid="stHeader"] { background: transparent; }
+
+        [data-testid="stHeader"] {
+            background: transparent;
+        }
+
         .block-container {
-            padding-top: 1.15rem;
+            padding-top: 1.2rem;
             padding-bottom: 1.8rem;
             max-width: 1380px;
         }
         section[data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #03101d 0%, #051424 100%);
+            background: rgba(3, 16, 29, 0.75);
+            backdrop-filter: blur(6px);
+            border-right: 1px solid rgba(120,145,170,0.10);
+        };
             border-right: 1px solid rgba(120,145,170,0.12);
             min-width: 290px !important;
             max-width: 290px !important;
@@ -2386,6 +2416,16 @@ def aplicar_design_portal():
             min-height: 40px;
             padding-left: 10px !important;
             margin-bottom: 8px;
+        }
+
+        .bv-card {
+            background: rgba(10, 34, 69, 0.75);
+            border: 1px solid rgba(170, 198, 236, 0.18);
+            border-radius: 20px;
+            padding: 20px 22px;
+            box-shadow: 0 16px 40px rgba(0,0,0,0.25);
+            backdrop-filter: blur(6px);
+            margin-bottom: 16px;
         }
         .bv-sidebar-top { display:flex; align-items:center; gap:10px; margin:4px 0 18px 0; }
         .bv-sidebar-logo { width:34px; height:34px; flex-shrink:0; }
@@ -2492,6 +2532,8 @@ menu_options_admin = [
     "Cadastro de Filiais",
     "Cadastro de Setores",
     "Cadastro de Cargos",
+    "Documentos SST",
+    "Vencimentos SST",
 ]
 
 menu_options_gestor = [
@@ -2501,6 +2543,8 @@ menu_options_gestor = [
     "Cadastro de Filiais",
     "Cadastro de Setores",
     "Cadastro de Cargos",
+    "Documentos SST",
+    "Vencimentos SST",
 ]
 
 st.session_state.setdefault("menu_atual", "Dashboard RH")
