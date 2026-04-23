@@ -231,13 +231,6 @@ def obter_email_config():
     }
 
 
-def get_empresa_contexto():
-    empresa_id = st.session_state.get("empresa_id")
-    if not empresa_id:
-        st.error("Sessão inválida ou expirada. Faça login novamente.")
-        st.stop()
-    return empresa_id
-
 
 def get_user_id():
     user_id = st.session_state.get("user_id")
@@ -1207,9 +1200,13 @@ def restaurar_login():
 def persistir_query_params():
     if st.session_state.get("token_sessao"):
         st.query_params["token"] = st.session_state.token_sessao
+        if st.session_state.get("menu_atual"):
+            st.query_params["menu"] = st.session_state.menu_atual
     else:
         if "token" in st.query_params:
             del st.query_params["token"]
+        if "menu" in st.query_params:
+            del st.query_params["menu"]
 
 
 if not st.session_state.logado:
@@ -1340,812 +1337,6 @@ def listar_tipos_documento_sst():
         FROM tipos_documento_sst
         WHERE ativo = TRUE
         ORDER BY nome
-        """
-    ).fetchall()
-
-
-@st.cache_data(ttl=60)
-def listar_filiais_ativas(empresa_id):
-    return conn.execute(
-        """
-        SELECT id, nome
-        FROM filiais
-        WHERE empresa_id = %s AND ativo = TRUE
-        ORDER BY nome
-        """,
-        (empresa_id,),
-    ).fetchall()
-
-
-@st.cache_data(ttl=60)
-def listar_colaboradores_ativos(empresa_id):
-    return conn.execute(
-        """
-        SELECT id, nome
-        FROM colaboradores
-        WHERE empresa_id = %s AND ativo = TRUE
-        ORDER BY nome
-        """,
-        (empresa_id,),
-    ).fetchall()
-
-
-def obter_nome_cliente(usuario):
-    row = conn.execute(
-        "SELECT nome FROM clientes WHERE usuario = %s",
-        (usuario,),
-    ).fetchone()
-    return row["nome"] if row and row["nome"] else usuario
-
-
-def atualizar_solicitacao(solicitacao_id, novo_status, observacao):
-    novo_status = normalizar_status(novo_status)
-
-    atual = conn.execute(
-        """
-        SELECT inicio_atendimento, fim_atendimento
-        FROM solicitacoes
-        WHERE id = %s
-        """,
-        (solicitacao_id,),
-    ).fetchone()
-
-    inicio_atendimento = atual["inicio_atendimento"] if atual else None
-    fim_atendimento = atual["fim_atendimento"] if atual else None
-    agora_atendimento = agora()
-
-    if novo_status == "Em atendimento" and not inicio_atendimento:
-        inicio_atendimento = agora_atendimento
-
-    if novo_status == "Concluído":
-        fim_atendimento = agora_atendimento
-
-    conn.execute(
-        """
-        UPDATE solicitacoes
-        SET status = %s,
-            resposta = %s,
-            inicio_atendimento = %s,
-            fim_atendimento = %s
-        WHERE id = %s
-        """,
-        (
-            novo_status,
-            (observacao or "").strip(),
-            inicio_atendimento,
-            fim_atendimento,
-            solicitacao_id,
-        ),
-    )
-
-
-def render_anexos_como_arquivo(solicitacao_id, prefixo="anexo"):
-    anexos = conn.execute(
-        """
-        SELECT id, nome_arquivo, observacao, imagem
-        FROM anexos
-        WHERE solicitacao_id = %s
-        ORDER BY id
-        """,
-        (solicitacao_id,),
-    ).fetchall()
-
-    if not anexos:
-        return
-
-    st.markdown("**Anexos do cliente:**")
-    for anexo in anexos:
-        nome_arquivo = anexo["nome_arquivo"] or "arquivo"
-        observacao = anexo["observacao"] or "Sem observação"
-        ext = Path(nome_arquivo).suffix.lower()
-        mime = "image/png"
-        if ext in [".jpg", ".jpeg"]:
-            mime = "image/jpeg"
-        elif ext == ".webp":
-            mime = "image/webp"
-
-        with st.expander(f"📎 {nome_arquivo}"):
-            st.caption(observacao)
-            st.image(anexo["imagem"], use_container_width=True)
-            st.download_button(
-                label="Baixar arquivo",
-                data=anexo["imagem"],
-                file_name=nome_arquivo,
-                mime=mime,
-                key=f"{prefixo}_download_{anexo['id']}",
-                use_container_width=False,
-            )
-
-
-def calcular_data_vencimento_documento(data_emissao, periodicidade_meses):
-    if not data_emissao or not periodicidade_meses:
-        return None
-    return (
-        pd.Timestamp(data_emissao) + pd.DateOffset(months=int(periodicidade_meses))
-    ).date()
-
-
-def obter_solicitacoes_filtradas(
-    cliente_id=None,
-    cliente_usuario=None,
-    empresa_id=None,
-    status_filtro="Todos",
-    prioridade_filtro="Todas",
-    busca="",
-    limite=50,
-    atendente_usuario=None,
-):
-    filtros = []
-    params = []
-
-    if atendente_usuario:
-        atendente = obter_atendente_por_usuario(atendente_usuario)
-        if atendente:
-            filtros.append("s.atendente_id = %s")
-            params.append(atendente["id"])
-        else:
-            return []
-
-    if cliente_id is not None:
-        filtros.append("s.cliente_id = %s")
-        params.append(cliente_id)
-    elif empresa_id is not None:
-
-        filtros.append("s.empresa_id = %s")
-        params.append(empresa_id)
-    elif cliente_usuario:
-        cliente_ref = obter_cliente_por_usuario(cliente_usuario)
-        if not cliente_ref:
-            return []
-        filtros.append("s.cliente_id = %s")
-        params.append(cliente_ref["id"])
-
-    if status_filtro != "Todos":
-        filtros.append(
-            """
-            CASE
-                WHEN s.status = 'Pendente' THEN 'Em análise'
-                WHEN s.status = 'Iniciado' THEN 'Em atendimento'
-                WHEN s.status = 'Pausado' THEN 'Aguardando cliente'
-                WHEN s.status = 'Resolvido' THEN 'Concluído'
-                ELSE s.status
-            END = %s
-            """
-        )
-        params.append(status_filtro)
-
-    if prioridade_filtro != "Todas":
-        filtros.append("COALESCE(s.prioridade, '') = %s")
-        params.append(prioridade_filtro)
-
-    busca = (busca or "").strip()
-    if busca:
-        if busca.isdigit():
-            filtros.append("(CAST(s.id AS TEXT) = %s OR s.titulo ILIKE %s)")
-            params.append(busca)
-            params.append(f"%{busca}%")
-        else:
-            filtros.append("s.titulo ILIKE %s")
-            params.append(f"%{busca}%")
-
-    where_clause = " AND ".join(filtros) if filtros else "TRUE"
-
-    sql = f"""
-        SELECT
-            s.id,
-            s.cliente,
-            s.cliente_id,
-            s.empresa_id,
-            s.atendente_id,
-            a.nome AS atendente_nome,
-            s.atribuido_em,
-            s.titulo,
-            s.descricao,
-            s.prioridade,
-            s.status,
-            s.complexidade,
-            s.resposta,
-            s.data_criacao,
-            s.inicio_atendimento,
-            s.fim_atendimento
-        FROM solicitacoes s
-        LEFT JOIN atendentes a ON a.id = s.atendente_id
-        WHERE {where_clause}
-        ORDER BY s.id DESC
-        LIMIT %s
-    """
-    params.append(limite)
-
-    rows = conn.execute(sql, params).fetchall()
-    dados = []
-    for row in rows:
-        item = dict(row)
-        item["status"] = normalizar_status(item.get("status"))
-        dados.append(item)
-    return dados
-
-
-def agrupar_solicitacoes_por_cliente(solicitacoes):
-    grupos = defaultdict(list)
-    for item in solicitacoes:
-        chave = (item.get("cliente_id"), item.get("cliente"))
-        grupos[chave].append(item)
-    return grupos
-
-
-def montar_url_convite(token_convite):
-    base_url = (
-        st.secrets.get("APP_BASE_URL") or os.getenv("APP_BASE_URL", "") or ""
-    ).strip()
-
-    if not base_url:
-        return f"?invite={quote_plus(token_convite)}"
-
-    base_url = base_url.rstrip("/")
-    return f"{base_url}/?invite={quote_plus(token_convite)}"
-
-
-def gerar_token_convite():
-    return secrets.token_urlsafe(24)
-
-
-def convite_expirado(convite):
-    expiracao = convite.get("expiracao_em")
-    if not expiracao:
-        return False
-    if expiracao.tzinfo is None:
-        return expiracao < agora().replace(tzinfo=None)
-    return expiracao < agora()
-
-
-def obter_convite_por_token(token):
-    convite = conn.execute(
-        """
-        SELECT c.*, e.fantasia AS empresa_nome
-        FROM convites_cadastro c
-        LEFT JOIN empresas e ON e.id = c.empresa_id
-        WHERE c.token = %s
-        LIMIT 1
-        """,
-        (token,),
-    ).fetchone()
-
-    if (
-        convite
-        and convite["status"] in ("pendente", "enviado")
-        and convite_expirado(convite)
-    ):
-        conn.execute(
-            "UPDATE convites_cadastro SET status = 'expirado' WHERE id = %s",
-            (convite["id"],),
-        )
-        convite = conn.execute(
-            """
-            SELECT c.*, e.fantasia AS empresa_nome
-            FROM convites_cadastro c
-            LEFT JOIN empresas e ON e.id = c.empresa_id
-            WHERE c.token = %s
-            LIMIT 1
-            """,
-            (token,),
-        ).fetchone()
-    return convite
-
-
-def criar_convite(nome, email, empresa_id, tipo_usuario, observacao=""):
-    token = gerar_token_convite()
-    usuario_sugerido = gerar_usuario(nome)
-    enviado_em = agora()
-    expiracao_em = agora() + timedelta(hours=CONVITE_EXPIRACAO_HORAS)
-
-    convite = conn.execute(
-        """
-        INSERT INTO convites_cadastro
-        (nome, email, empresa_id, tipo_usuario, token, status, observacao, usuario_sugerido, enviado_em, expiracao_em)
-        VALUES (%s, %s, %s, %s, %s, 'enviado', %s, %s, %s, %s)
-        RETURNING id
-        """,
-        (
-            nome.strip(),
-            email.strip().lower(),
-            empresa_id,
-            tipo_usuario,
-            token,
-            observacao.strip(),
-            usuario_sugerido,
-            enviado_em,
-            expiracao_em,
-        ),
-    ).fetchone()
-
-    link_convite = montar_url_convite(token)
-    email_enviado = False
-    email_msg = "Configuração de e-mail não encontrada. O convite foi criado apenas com link manual."
-
-    if email_configurada():
-        email_enviado, email_msg = enviar_email_convite(
-            destinatario=email.strip().lower(),
-            nome=nome.strip(),
-            link=link_convite,
-        )
-
-    return {
-        "id": convite["id"],
-        "token": token,
-        "link": link_convite,
-        "email_enviado": email_enviado,
-        "email_msg": email_msg,
-    }
-
-
-def calcular_vencimento_documento(data_emissao, periodicidade_meses):
-    if not data_emissao or not periodicidade_meses:
-        return None
-    return (
-        pd.Timestamp(data_emissao) + pd.DateOffset(months=int(periodicidade_meses))
-    ).date()
-
-
-def classificar_status_vencimento(data_vencimento, revisao_necessaria=False):
-    if revisao_necessaria:
-        return "Revisão necessária"
-
-    if not data_vencimento:
-        return "Vigente"
-
-    hoje = agora().date()
-    if hasattr(data_vencimento, "date"):
-        data_vencimento = data_vencimento.date()
-
-    dias = (data_vencimento - hoje).days
-
-    if dias < 0:
-        return "Vencido"
-    elif dias <= 30:
-        return "A vencer"
-    return "Vigente"
-
-
-def validar_upload_documento_sst(arquivo):
-    nome = (arquivo.name or "").lower()
-    ext = Path(nome).suffix.lower()
-    permitidos = {".pdf", ".png", ".jpg", ".jpeg"}
-
-    if ext not in permitidos:
-        return False, "Tipo de arquivo inválido. Envie PDF, PNG, JPG ou JPEG."
-
-    tamanho = len(arquivo.getvalue())
-    limite = MAX_UPLOAD_MB * 1024 * 1024
-
-    if tamanho > limite:
-        return False, f"O arquivo excede o limite de {MAX_UPLOAD_MB} MB."
-
-    return True, ""
-
-
-def registrar_evento_revisao_sst(
-    empresa_id, filial_id, tipo_evento, descricao, data_evento
-):
-    conn.execute(
-        """
-        INSERT INTO eventos_revisao_sst (
-            empresa_id, filial_id, tipo_evento, descricao, data_evento, created_at
-        )
-        VALUES (%s, %s, %s, %s, %s, %s)
-        """,
-        (
-            empresa_id,
-            filial_id,
-            tipo_evento,
-            descricao.strip(),
-            data_evento,
-            agora(),
-        ),
-    )
-
-
-def reenviar_convite(convite_id):
-    convite = conn.execute(
-        """
-        SELECT id, nome, email
-        FROM convites_cadastro
-        WHERE id = %s
-        LIMIT 1
-        """,
-        (convite_id,),
-    ).fetchone()
-
-    if not convite:
-        raise ValueError("Convite não encontrado.")
-
-    token = gerar_token_convite()
-    enviado_em = agora()
-    expiracao_em = agora() + timedelta(hours=CONVITE_EXPIRACAO_HORAS)
-
-    conn.execute(
-        """
-        UPDATE convites_cadastro
-        SET token = %s,
-            status = 'enviado',
-            enviado_em = %s,
-            expiracao_em = %s
-        WHERE id = %s
-        """,
-        (token, enviado_em, expiracao_em, convite_id),
-    )
-
-    link_convite = montar_url_convite(token)
-    email_enviado = False
-    email_msg = "Configuração de e-mail não encontrada. O convite foi renovado apenas com link manual."
-
-    if email_configurada():
-        email_enviado, email_msg = enviar_email_convite(
-            destinatario=convite["email"],
-            nome=convite["nome"],
-            link=link_convite,
-        )
-
-    return {
-        "token": token,
-        "link": link_convite,
-        "email_enviado": email_enviado,
-        "email_msg": email_msg,
-    }
-
-
-def concluir_convite(
-    convite, nome, usuario, senha, cpf="", funcao="", email="", nome_atendente=""
-):
-    tipo = convite["tipo_usuario"]
-
-    if tipo == "cliente":
-        existe = conn.execute(
-            "SELECT 1 FROM clientes WHERE usuario = %s",
-            (usuario,),
-        ).fetchone()
-        if existe:
-            raise ValueError("Já existe um cliente com esse usuário.")
-
-        conn.execute(
-            """
-            INSERT INTO clientes (usuario, senha, nome, ativo, cpf, empresa_id, funcao, email)
-            VALUES (%s, %s, %s, TRUE, %s, %s, %s, %s)
-            """,
-            (
-                usuario,
-                gerar_hash_senha(senha),
-                nome,
-                cpf,
-                convite["empresa_id"],
-                funcao,
-                email.strip().lower(),
-            ),
-        )
-    else:
-        existe = conn.execute(
-            "SELECT 1 FROM atendentes WHERE usuario = %s",
-            (usuario,),
-        ).fetchone()
-        if existe:
-            raise ValueError("Já existe um atendente com esse usuário.")
-
-        conn.execute(
-            """
-            INSERT INTO atendentes (nome, usuario, senha, email, ativo)
-            VALUES (%s, %s, %s, %s, TRUE)
-            """,
-            (
-                nome_atendente or nome,
-                usuario,
-                gerar_hash_senha(senha),
-                email.strip().lower(),
-            ),
-        )
-
-    conn.execute(
-        """
-        UPDATE convites_cadastro
-        SET status = 'concluido',
-            utilizado_em = %s
-        WHERE id = %s
-        """,
-        (agora(), convite["id"]),
-    )
-
-
-def aplicar_estilo_login():
-    st.markdown(
-        """
-        <style>
-        html, body, [data-testid="stAppViewContainer"] {
-            height: 100%;
-        }
-
-        .stApp {
-            background: linear-gradient(135deg, #04182D 0%, #0B3A63 100%);
-        }
-
-        section[data-testid="stSidebar"] {
-            display: none;
-        }
-
-        [data-testid="stHeader"] {
-            background: transparent;
-        }
-
-        .block-container {
-            max-width: 1380px;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            padding-top: 1.5rem !important;
-            padding-bottom: 1.5rem !important;
-        }
-
-        .block-container > div {
-            width: 100%;
-        }
-
-        .login-brand {
-            min-height: 720px;
-            border-radius: 32px;
-            padding: 42px 42px;
-            background: linear-gradient(180deg, rgba(7, 33, 66, 0.96) 0%, rgba(4, 35, 74, 0.98) 100%);
-            border: 1px solid rgba(88, 140, 220, 0.28);
-            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
-            display: flex;
-            align-items: center;
-        }
-
-        .login-brand-inner {
-            width: 100%;
-            max-width: 560px;
-        }
-
-        .login-brand-logo {
-            margin-bottom: 22px;
-        }
-
-        .login-brand-logo img {
-            max-width: 126px;
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-
-        .brand-kicker {
-            color: #71B6FF;
-            font-size: 13px;
-            font-weight: 600;
-            margin-bottom: 16px;
-        }
-
-        .brand-title-main {
-            color: #FFFFFF;
-            font-size: 66px;
-            line-height: 1.02;
-            font-weight: 800;
-            margin: 0;
-        }
-
-        .brand-title-sub {
-            color: #6FAEFF;
-            font-size: 40px;
-            line-height: 1.08;
-            font-weight: 700;
-            margin: 10px 0 26px 0;
-        }
-
-        .brand-description {
-            color: #E4EEFA;
-            font-size: 18px;
-            line-height: 1.65;
-            margin: 0 0 26px 0;
-            max-width: 520px;
-        }
-
-        .brand-benefits {
-            list-style: none;
-            padding: 0;
-            margin: 0 0 28px 0;
-        }
-
-        .brand-benefits li {
-            color: #F3F8FF;
-            font-size: 17px;
-            line-height: 1.55;
-            margin-bottom: 14px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .brand-check {
-            width: 18px;
-            height: 18px;
-            min-width: 18px;
-            border-radius: 999px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(60, 126, 255, 0.18);
-            border: 1px solid rgba(111, 174, 255, 0.35);
-            color: #A8CCFF;
-            font-size: 12px;
-            font-weight: 700;
-        }
-
-        .brand-divider {
-            height: 1px;
-            width: 100%;
-            max-width: 520px;
-            background: rgba(133, 163, 204, 0.22);
-            margin: 18px 0 22px 0;
-        }
-
-        .brand-footer {
-            color: #B9CAE0;
-            font-size: 16px;
-            line-height: 1.6;
-            max-width: 520px;
-        }
-
-        .login-panel-wrap {
-            min-height: 720px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .login-panel {
-            width: 100%;
-            max-width: 520px;
-            margin: auto;
-            padding: 38px 34px 30px 34px;
-            background: rgba(2, 21, 46, 0.84);
-            border: 1px solid rgba(88, 140, 220, 0.22);
-            border-radius: 30px;
-            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
-        }
-
-        .login-panel-top-icon {
-            width: 72px;
-            height: 72px;
-            margin: 0 auto 18px auto;
-            border-radius: 999px;
-            border: 1px solid rgba(111, 174, 255, 0.20);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #2E7DFF;
-            font-size: 30px;
-        }
-
-        .login-panel h2 {
-            margin: 0 0 12px 0;
-            text-align: center;
-            color: #FFFFFF;
-            font-size: 28px;
-            line-height: 1.15;
-            font-weight: 800;
-        }
-
-        .login-panel .sub {
-            text-align: center;
-            color: #CBD8EA;
-            font-size: 15px;
-            line-height: 1.5;
-            margin-bottom: 24px;
-        }
-
-        .stTextInput label {
-            color: #E8F0FB !important;
-            font-weight: 600 !important;
-        }
-
-        .stTextInput > div > div > input {
-            background: rgba(255,255,255,0.05) !important;
-            color: #FFFFFF !important;
-            border: 1px solid rgba(150, 184, 227, 0.22) !important;
-            border-radius: 12px !important;
-            min-height: 48px !important;
-        }
-
-        .stTextInput > div > div > input::placeholder {
-            color: #8EA7C6 !important;
-        }
-
-        .stButton > button {
-            width: 100%;
-            min-height: 50px;
-            border-radius: 14px;
-            font-weight: 700;
-            font-size: 16px;
-            border: 1px solid rgba(70, 122, 214, 0.55);
-            background: linear-gradient(180deg, #1E56BA 0%, #1A4EAB 100%);
-            color: #FFFFFF;
-            box-shadow: 0 8px 22px rgba(20, 64, 146, 0.20);
-        }
-
-        .login-panel-divider {
-            height: 1px;
-            background: rgba(133, 163, 204, 0.18);
-            margin: 22px 0 18px 0;
-        }
-
-        .login-panel-footer {
-            text-align: center;
-            color: #AABDD6;
-            font-size: 14px;
-            line-height: 1.5;
-        }
-
-        @media (max-width: 1100px) {
-            .block-container {
-                max-width: 100%;
-                min-height: auto;
-                display: block;
-                padding-top: 1rem !important;
-                padding-bottom: 1rem !important;
-            }
-
-            .login-brand,
-            .login-panel-wrap {
-                min-height: auto;
-            }
-
-            .login-panel {
-                margin-top: 20px;
-            }
-
-            .brand-title-main {
-                font-size: 52px;
-            }
-
-            .brand-title-sub {
-                font-size: 32px;
-            }
-        }
-
-        @media (max-width: 640px) {
-            .login-brand {
-                padding: 28px 22px;
-                border-radius: 24px;
-            }
-
-            .login-panel {
-                padding: 24px 18px 22px 18px;
-                border-radius: 24px;
-            }
-
-            .brand-title-main {
-                font-size: 42px;
-            }
-
-            .brand-title-sub {
-                font-size: 26px;
-            }
-
-            .brand-description,
-            .brand-benefits li,
-            .brand-footer {
-                font-size: 15px;
-            }
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-@st.cache_data(ttl=60)
-def listar_tipos_documento_sst():
-    return conn.execute(
-        """
-        SELECT id, codigo, nome, escopo, periodicidade_meses, exige_revisao_por_evento
-        FROM tipos_documento_sst
-        WHERE ativo = TRUE
-        ORDER BY nome
     """
     ).fetchall()
 
@@ -2174,132 +1365,6 @@ def listar_colaboradores_ativos(empresa_id):
     """,
         (empresa_id,),
     ).fetchall()
-
-
-def render_tela_convite(token_convite):
-    aplicar_estilo_login()
-
-    convite = obter_convite_por_token(token_convite)
-
-    col_left, col_center, col_right = st.columns([0.18, 0.64, 0.18])
-
-    with col_center:
-        st.markdown('<div class="convite-card">', unsafe_allow_html=True)
-
-        if logo_b64:
-            st.markdown(
-                f"""
-                <div class="convite-logo">
-                    <img src="data:image/png;base64,{logo_b64}">
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        st.markdown(
-            """
-            <div class="convite-titulo">Concluir cadastro</div>
-            <div class="convite-subtitulo">
-                Finalize seu acesso ao ambiente Gestão RH.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        if not convite:
-            st.error("Convite inválido.")
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.stop()
-
-        if convite["status"] == "concluido":
-            st.success("Este convite já foi utilizado.")
-            portal_url = (
-                st.secrets.get("APP_BASE_URL") or os.getenv("APP_BASE_URL", "") or ""
-            ).rstrip("/")
-            if portal_url:
-                st.link_button("Acessar portal", portal_url, use_container_width=True)
-                st.caption(f"Portal: {portal_url}")
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.stop()
-
-        if convite["status"] in ("cancelado", "expirado") or convite_expirado(convite):
-            st.error("Este convite expirou ou foi cancelado.")
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.stop()
-
-        st.info(
-            f"Convite para {convite['nome']} • Perfil: {convite['tipo_usuario'].capitalize()}"
-            + (
-                f" • Empresa: {convite['empresa_nome']}"
-                if convite.get("empresa_nome")
-                else ""
-            )
-        )
-
-        email = st.text_input("E-mail", value=convite["email"], disabled=True)
-        nome = st.text_input("Nome completo", value=convite["nome"])
-        usuario = st.text_input(
-            "Usuário",
-            value=convite.get("usuario_sugerido") or gerar_usuario(convite["nome"]),
-        )
-        senha = st.text_input("Senha", type="password")
-        confirmar_senha = st.text_input("Confirmar senha", type="password")
-
-        cpf = ""
-        funcao = ""
-        if convite["tipo_usuario"] == "cliente":
-            cpf = st.text_input("CPF")
-            funcao = st.text_input("Função")
-        else:
-            funcao = st.text_input("Função / Cargo")
-
-        if st.button("Concluir cadastro", use_container_width=True):
-            if not nome.strip() or not usuario.strip() or not senha.strip():
-                st.error("Preencha nome, usuário e senha.")
-            elif senha != confirmar_senha:
-                st.error("As senhas não conferem.")
-            elif len(senha.strip()) < 6:
-                st.error("A senha deve ter pelo menos 6 caracteres.")
-            else:
-                try:
-                    concluir_convite(
-                        convite=convite,
-                        nome=nome.strip(),
-                        usuario=usuario.strip(),
-                        senha=senha.strip(),
-                        cpf=cpf.strip(),
-                        funcao=funcao.strip(),
-                        email=email.strip(),
-                        nome_atendente=nome.strip(),
-                    )
-
-                    st.success(
-                        "Cadastro concluído com sucesso. Agora você já pode acessar o portal."
-                    )
-
-                    portal_url = (
-                        st.secrets.get("APP_BASE_URL")
-                        or os.getenv("APP_BASE_URL", "")
-                        or ""
-                    ).rstrip("/")
-
-                    st.info(f"Usuário cadastrado: {usuario}")
-
-                    if portal_url:
-                        st.link_button(
-                            "Acessar portal", portal_url, use_container_width=True
-                        )
-                        st.caption(f"Portal: {portal_url}")
-                    else:
-                        st.warning("URL do portal não configurada.")
-
-                except ValueError as exc:
-                    st.error(str(exc))
-                except Exception as exc:
-                    st.error(f"Erro ao concluir cadastro: {exc}")
-
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.stop()
 
 
 def render_tela_convite(token_convite):
@@ -2506,74 +1571,6 @@ if invite_token:
 # =========================
 # TELA DE LOGIN (SaaS)
 # =========================
-
-if not st.session_state.get("logado", False):
-    aplicar_estilo_login()
-
-    col_left, col_right = st.columns([1.08, 0.92], gap="large")
-
-    with col_left:
-        st.markdown('<div class="glass-card glass-card-left">', unsafe_allow_html=True)
-
-        st.markdown("### Plataforma corporativa")
-        if logo_b64:
-            st.image(f"data:image/png;base64,{logo_b64}")
-        st.markdown("# Gestão RH")
-        st.markdown("## Controle e inteligência para sua operação")
-        st.write(
-            "Centralize estrutura organizacional, usuários, colaboradores e indicadores "
-            "em um ambiente seguro, escalável e orientado por dados."
-        )
-        st.write("✓ Controle do quadro em tempo real")
-        st.write("✓ Estrutura por filiais, setores e cargos")
-        st.write("✓ Acesso segregado por empresa")
-        st.caption("Arquitetura SaaS • Segurança • Performance")
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with col_right:
-        st.markdown('<div class="glass-card glass-card-right">', unsafe_allow_html=True)
-
-        st.markdown("## Acessar plataforma")
-        st.caption("Entre com seu usuário corporativo.")
-
-        usuario_input = st.text_input(
-            "Usuário ou e-mail",
-            placeholder="Digite seu usuário ou e-mail",
-            key="login_usuario",
-        )
-
-        senha_input = st.text_input(
-            "Senha",
-            type="password",
-            placeholder="Digite sua senha",
-            key="login_senha",
-        )
-
-        if st.button("ENTRAR", use_container_width=True, key="btn_login"):
-            usuario_digitado = usuario_input.strip()
-            senha_digitada = senha_input.strip()
-
-            if not usuario_digitado or not senha_digitada:
-                st.error("Informe usuário e senha.")
-            else:
-                usuario = autenticar_usuario(usuario_digitado, senha_digitada)
-                if usuario:
-                    registrar_sessao_usuario(usuario)
-                    st.rerun()
-                elif autenticar_admin(usuario_digitado, senha_digitada):
-                    st.error(
-                        "O acesso master legado não está habilitado neste fluxo SaaS."
-                    )
-                else:
-                    st.error("Usuário ou senha inválidos.")
-
-        st.caption("Ambiente seguro e preparado para empresas.")
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    st.stop()
-
 
 if not st.session_state.logado:
     aplicar_estilo_login()
@@ -3618,8 +2615,8 @@ elif menu == "Demandas Solicitadas":
         st.info("Nenhuma solicitação encontrada com os filtros aplicados.")
 
 
-elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
-    exigir_perfil("admin", "gestor")
+elif menu == "Dashboard RH" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Painel RH")
 
     empresa_id = get_empresa_contexto()
@@ -4070,8 +3067,8 @@ elif menu == "Cadastro de Empresas" and perfil_atual in ("superadmin", "operador
         st.info("Nenhuma empresa cadastrada ainda.")
 
 
-elif menu == "Cadastro de Filiais" and perfil_atual in ("admin", "gestor"):
-    exigir_perfil("admin", "gestor")
+elif menu == "Cadastro de Filiais" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Cadastro de Filiais")
     empresa_id = get_empresa_contexto()
 
@@ -4259,8 +3256,8 @@ elif menu == "Cadastro de Filiais" and perfil_atual in ("admin", "gestor"):
         st.info("Nenhuma filial cadastrada ainda.")
 
 
-elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor"):
-    exigir_perfil("admin", "gestor")
+elif menu == "Cadastro de Colaboradores" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Cadastro de Colaboradores")
     empresa_id = get_empresa_contexto()
 
@@ -4742,8 +3739,8 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
     else:
         st.info("Nenhum colaborador cadastrado ainda.")
 
-elif menu == "Cadastro de Setores" and perfil_atual in ("admin", "gestor"):
-    exigir_perfil("admin", "gestor")
+elif menu == "Cadastro de Setores" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Cadastro de Setores")
     empresa_id = get_empresa_contexto()
 
@@ -4870,8 +3867,8 @@ elif menu == "Cadastro de Setores" and perfil_atual in ("admin", "gestor"):
     else:
         st.info("Nenhum setor cadastrado ainda.")
 
-elif menu == "Cadastro de Cargos" and perfil_atual in ("admin", "gestor"):
-    exigir_perfil("admin", "gestor")
+elif menu == "Cadastro de Cargos" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Cadastro de Cargos")
     empresa_id = get_empresa_contexto()
 
@@ -5325,8 +4322,8 @@ elif menu == "Painel de Cadastros" and perfil_atual in ("superadmin", "operador"
                     )
 
 
-elif menu == "Quadro de Funcionários" and perfil_atual in ("admin", "gestor"):
-    exigir_perfil("admin", "gestor")
+elif menu == "Quadro de Funcionários" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Quadro de Funcionários")
     empresa_id = get_empresa_contexto()
     ###############
@@ -5396,8 +4393,8 @@ elif menu == "Quadro de Funcionários" and perfil_atual in ("admin", "gestor"):
         )
 
 
-elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
-    exigir_perfil("admin", "gestor")
+elif menu == "Documentos SST" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Documentos SST")
     empresa_id = get_empresa_contexto()
     # atualizar_status_documentos_sst_empresa(empresa_id)
@@ -5700,6 +4697,8 @@ elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
         d.data_emissao,
         d.data_vencimento,
         d.revisao_necessaria,
+        d.observacao,
+        d.arquivo_nome,
         c.nome AS colaborador_nome,
         c.matricula,
         f.nome AS filial_nome,
@@ -5709,7 +4708,7 @@ elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
             WHEN d.data_vencimento < CURRENT_DATE THEN 'Vencido'
             WHEN d.data_vencimento <= CURRENT_DATE + INTERVAL '30 days' THEN 'A vencer'
             ELSE 'Vigente'
-        END AS status_calculado
+        END AS status
     FROM documentos_sst d
     JOIN tipos_documento_sst td ON td.id = d.tipo_documento_id
     LEFT JOIN colaboradores c ON c.id = d.colaborador_id
@@ -5795,8 +4794,8 @@ elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
     else:
         st.info("Nenhum documento SST encontrado com os filtros aplicados.")
 
-elif menu == "Vencimentos SST" and perfil_atual in ("admin", "gestor"):
-    exigir_perfil("admin", "gestor")
+elif menu == "Vencimentos SST" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
+    exigir_perfil("superadmin", "operador", "admin", "gestor")
     st.header("Vencimentos SST")
     empresa_id = get_empresa_contexto()
     atualizar_status_documentos_sst_empresa(empresa_id)
