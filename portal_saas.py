@@ -1527,14 +1527,8 @@ def aplicar_estilo_login():
 
         .block-container {
             max-width: 1440px;
-            padding-top: 1.5rem !important;
-            padding-bottom: 1.5rem !important;
-        }
-
-        .login-shell {
-            min-height: calc(100vh - 3rem);
-            display: flex;
-            align-items: center;
+            padding-top: 2rem !important;
+            padding-bottom: 2rem !important;
         }
 
         .login-brand {
@@ -1590,16 +1584,10 @@ def aplicar_estilo_login():
             font-size: 13px;
         }
 
-        .login-panel-wrap {
-            min-height: 720px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
         .login-panel {
             width: 100%;
             max-width: 520px;
+            margin: 80px auto 0 auto;
             background: rgba(5, 22, 38, 0.72);
             border: 1px solid rgba(255,255,255,0.08);
             border-radius: 24px;
@@ -1642,14 +1630,17 @@ def aplicar_estilo_login():
         }
 
         @media (max-width: 980px) {
-            .login-brand, .login-panel-wrap {
-                min-height: auto;
-            }
             .login-brand {
+                min-height: auto;
                 padding: 36px 28px;
             }
+
             .login-brand h1 {
                 font-size: 34px;
+            }
+
+            .login-panel {
+                margin-top: 24px;
             }
         }
         </style>
@@ -1664,11 +1655,15 @@ def render_tela_convite(token_convite):
     st.markdown(
         """
         <style>
-        .convite-wrap {
+        .convite-card {
             width: 100%;
             max-width: 520px;
-            margin: 0 auto;
-            padding: 12px 10px 32px 10px;
+            margin: 40px auto 0 auto;
+            background: rgba(5, 22, 38, 0.72);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 24px;
+            padding: 28px 24px 24px 24px;
+            box-shadow: 0 18px 54px rgba(0,0,0,0.22);
         }
 
         .convite-logo {
@@ -1708,9 +1703,10 @@ def render_tela_convite(token_convite):
                 padding-bottom: 18px !important;
             }
 
-            .convite-wrap {
+            .convite-card {
                 max-width: 100%;
-                padding: 8px 4px 24px 4px;
+                margin-top: 10px;
+                padding: 22px 16px 18px 16px;
             }
 
             .convite-logo img {
@@ -1732,7 +1728,7 @@ def render_tela_convite(token_convite):
 
     convite = obter_convite_por_token(token_convite)
 
-    st.markdown('<div class="convite-wrap">', unsafe_allow_html=True)
+    st.markdown('<div class="convite-card">', unsafe_allow_html=True)
 
     if logo_b64:
         st.markdown(
