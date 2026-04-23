@@ -2159,64 +2159,23 @@ if not st.session_state.get("logado", False):
     col_left, col_right = st.columns([1.08, 0.92], gap="large")
 
     with col_left:
-        st.markdown(
-            '<div class="login-brand"><div class="login-brand-inner">',
-            unsafe_allow_html=True,
-        )
-
+        st.markdown("### Plataforma corporativa")
         if logo_b64:
-            st.markdown(
-                f"""
-                <div class="login-brand-logo">
-                    <img src="data:image/png;base64,{logo_b64}">
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        st.markdown(
-            """
-            <div class="brand-kicker">Plataforma corporativa</div>
-            <div class="brand-title-main">Gestão RH</div>
-            <div class="brand-title-sub">Controle e inteligência para sua operação</div>
-
-            <div class="brand-description">
-                Centralize estrutura organizacional, usuários, colaboradores e indicadores
-                em um ambiente seguro, escalável e orientado por dados.
-            </div>
-
-            <ul class="brand-benefits">
-                <li><span class="brand-check">✓</span> Controle do quadro em tempo real</li>
-                <li><span class="brand-check">✓</span> Estrutura por filiais, setores e cargos</li>
-                <li><span class="brand-check">✓</span> Acesso segregado por empresa</li>
-            </ul>
-
-            <div class="brand-divider"></div>
-
-            <div class="brand-footer">
-                Arquitetura SaaS • Segurança • Performance
-            </div>
-            """,
-            unsafe_allow_html=True,
+            st.image(f"data:image/png;base64,{logo_b64}")
+        st.markdown("# Gestão RH")
+        st.markdown("## Controle e inteligência para sua operação")
+        st.write(
+            "Centralize estrutura organizacional, usuários, colaboradores e indicadores "
+            "em um ambiente seguro, escalável e orientado por dados."
         )
-
-        st.markdown("</div></div>", unsafe_allow_html=True)
+        st.write("✓ Controle do quadro em tempo real")
+        st.write("✓ Estrutura por filiais, setores e cargos")
+        st.write("✓ Acesso segregado por empresa")
+        st.caption("Arquitetura SaaS • Segurança • Performance")
 
     with col_right:
-        st.markdown(
-            '<div class="login-panel-wrap"><div class="login-panel">',
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            '<div class="login-panel-top-icon">🔒</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown("<h2>Acessar plataforma</h2>", unsafe_allow_html=True)
-        st.markdown(
-            "<div class='sub'>Entre com seu usuário corporativo.</div>",
-            unsafe_allow_html=True,
-        )
+        st.markdown("## Acessar plataforma")
+        st.caption("Entre com seu usuário corporativo.")
 
         usuario_input = st.text_input(
             "Usuário ou e-mail",
@@ -2250,13 +2209,7 @@ if not st.session_state.get("logado", False):
                 else:
                     st.error("Usuário ou senha inválidos.")
 
-        st.markdown('<div class="login-panel-divider"></div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="login-panel-footer">Ambiente seguro e preparado para empresas.</div>',
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("</div></div>", unsafe_allow_html=True)
+        st.caption("Ambiente seguro e preparado para empresas.")
 
     st.stop()
 
