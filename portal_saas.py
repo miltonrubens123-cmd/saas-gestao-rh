@@ -1572,7 +1572,34 @@ def aplicar_estilo_login():
         .block-container > div {
             width: 100%;
         }
-        
+        /* CARD ESQUERDO */
+        [data-testid="column"]:nth-child(1) > div {
+            background: linear-gradient(180deg, rgba(7, 33, 66, 0.85), rgba(4, 35, 74, 0.95));
+            border: 1px solid rgba(88, 140, 220, 0.25);
+            border-radius: 28px;
+            padding: 32px 32px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+        }
+
+        /* CARD DIREITO */
+        [data-testid="column"]:nth-child(2) > div {
+            background: rgba(2, 21, 46, 0.65);
+            border: 1px solid rgba(88, 140, 220, 0.2);
+            border-radius: 24px;
+            padding: 28px 28px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+        }
+
+        /* efeito glow leve */
+        [data-testid="column"]:nth-child(2) > div {
+            backdrop-filter: blur(6px);
+        }
+
+        /* espaçamento interno melhor */
+        [data-testid="column"] > div > div {
+            width: 100%;
+        }
+
         .login-brand {
             min-height: 720px;
             border-radius: 32px;
