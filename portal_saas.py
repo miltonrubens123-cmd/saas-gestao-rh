@@ -588,6 +588,36 @@ def enviar_email_convite(destinatario, nome, link):
     except Exception as exc:
         return False, f"Falha ao enviar e-mail: {exc}"
 
+def obter_usuario_logado():
+    user_id = st.session_state.get("user_id")
+    empresa_id = st.session_state.get("empresa_id")
+
+    if not user_id or not empresa_id:
+        return None
+
+    return conn.execute(
+        """
+        SELECT
+            u.id,
+            u.empresa_id,
+            u.nome,
+            u.email,
+            u.usuario,
+            u.perfil,
+            u.ativo,
+            e.fantasia AS empresa_nome,
+            e.plano,
+            e.ativo AS empresa_ativa
+        FROM usuarios u
+        JOIN empresas e ON e.id = u.empresa_id
+        WHERE u.id = %s
+          AND u.empresa_id = %s
+          AND u.ativo = TRUE
+          AND e.ativo = TRUE
+        LIMIT 1
+        """,
+        (user_id, empresa_id),
+    ).fetchone()
 
 def obter_admin_config():
     admin_user = (
@@ -1214,6 +1244,16 @@ menu_options_usuario = ["Nova Solicitação", "Demandas Solicitadas"]
 usuario = obter_usuario_logado()
 
 if not usuario:
+    st.error("Sessão inválida. Faça login novamente.")
+    logout()
+    st.stop()
+
+perfil_atual = usuario["perfil"]
+empresa_id = usuario["empresa_id"]
+st.session_state.empresa_nome = usuario.get("empresa_nome") or ""
+st.session_state.plano = usuario.get("plano") or ""
+
+if not usuario:
     st.stop()
 
 perfil_atual = usuario["perfil"]
@@ -1233,9 +1273,11 @@ if st.session_state.get("menu_atual") not in menu_options:
     st.session_state.menu_atual = menu_options[0]
 
 menu = st.session_state.menu_atual
+
 token = st.session_state.get("token_sessao")
 if token:
     atualizar_menu_sessao(token, menu)
+
 persistir_query_params()
 
 
