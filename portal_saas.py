@@ -1792,7 +1792,7 @@ def render_tela_convite(token_convite):
         )
 
     st.markdown(
-        '<div class="convite-titulo">PORTAL ARATI</div>',
+        '<div class="convite-titulo">Gestão RH</div>',
         unsafe_allow_html=True,
     )
 
@@ -1905,7 +1905,6 @@ if invite_token:
 if not st.session_state.logado:
     aplicar_estilo_login()
 
-    st.markdown('<div class="login-shell">', unsafe_allow_html=True)
     col_left, col_right = st.columns([1.05, 0.95], gap="large")
 
     with col_left:
@@ -1939,13 +1938,8 @@ if not st.session_state.logado:
         unsafe_allow_html=True,
     )
 
-    st.markdown("</div></div>", unsafe_allow_html=True)
-
     with col_right:
-        st.markdown(
-            '<div class="login-panel-wrap"><div class="login-panel">',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="login-panel">', unsafe_allow_html=True)
 
         st.markdown("<h2>Acessar plataforma</h2>", unsafe_allow_html=True)
         st.markdown(
