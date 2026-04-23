@@ -12,7 +12,7 @@ from email.mime.text import MIMEText
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, unquote_plus
 
 import pandas as pd
 import psycopg
@@ -1962,17 +1962,52 @@ def convite_expirado(convite):
     return expiracao < agora()
 
 
+def normalizar_token_convite(token):
+    if token is None:
+        return ""
+
+    if isinstance(token, (list, tuple)):
+        token = token[0] if token else ""
+
+    token = str(token).strip()
+    token = token.strip(" [](){}")
+    token = token.strip('"')
+    token = token.strip("'")
+    token = unquote_plus(token)
+    return token
+
+
 def obter_convite_por_token(token):
-    convite = conn.execute(
-        """
-        SELECT c.*, e.fantasia AS empresa_nome
-        FROM convites_cadastro c
-        LEFT JOIN empresas e ON e.id = c.empresa_id
-        WHERE c.token = %s
-        LIMIT 1
-        """,
-        (token,),
-    ).fetchone()
+    token_normalizado = normalizar_token_convite(token)
+    if not token_normalizado:
+        return None
+
+    tokens_teste = []
+    for candidato in (
+        token_normalizado,
+        token_normalizado.strip(),
+        token_normalizado.rstrip('/'),
+    ):
+        candidato = normalizar_token_convite(candidato)
+        if candidato and candidato not in tokens_teste:
+            tokens_teste.append(candidato)
+
+    convite = None
+    token_encontrado = None
+    for candidato in tokens_teste:
+        convite = conn.execute(
+            """
+            SELECT c.*, e.fantasia AS empresa_nome
+            FROM convites_cadastro c
+            LEFT JOIN empresas e ON e.id = c.empresa_id
+            WHERE c.token = %s
+            LIMIT 1
+            """,
+            (candidato,),
+        ).fetchone()
+        if convite:
+            token_encontrado = candidato
+            break
 
     if (
         convite
@@ -1991,7 +2026,7 @@ def obter_convite_por_token(token):
             WHERE c.token = %s
             LIMIT 1
             """,
-            (token,),
+            (token_encontrado,),
         ).fetchone()
     return convite
 
@@ -2863,7 +2898,16 @@ def render_tela_convite(token_convite):
     st.stop()
 
 
-invite_token = st.query_params.get("invite")
+def extrair_invite_token():
+    for chave in ("invite", "invite_token", "token_convite", "token"):
+        valor = st.query_params.get(chave)
+        valor = normalizar_token_convite(valor)
+        if valor:
+            return valor
+    return ""
+
+
+invite_token = extrair_invite_token()
 if invite_token:
     render_tela_convite(invite_token)
 
