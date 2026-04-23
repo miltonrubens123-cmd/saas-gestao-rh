@@ -84,6 +84,134 @@ def run_query(sql, params=None, fetchone=False, fetchall=False):
             return None
 
 
+def obter_usuarios_empresa(empresa_id):
+    return conn.execute(
+        """
+        SELECT id, nome, email, usuario, perfil, ativo, created_at
+        FROM usuarios
+        WHERE empresa_id = %s
+        ORDER BY nome, usuario
+        """,
+        (empresa_id,),
+    ).fetchall()
+
+
+def obter_usuario_empresa_por_id(usuario_id, empresa_id):
+    return conn.execute(
+        """
+        SELECT id, empresa_id, nome, email, usuario, perfil, ativo, created_at
+        FROM usuarios
+        WHERE id = %s
+          AND empresa_id = %s
+        LIMIT 1
+        """,
+        (usuario_id, empresa_id),
+    ).fetchone()
+
+
+def criar_usuario_empresa(empresa_id, nome, email, usuario, senha, perfil):
+    if not validar_limite_usuarios_empresa(empresa_id):
+        raise ValueError("Limite de usuários atingido para esta empresa.")
+
+    usuario_existente = conn.execute(
+        """
+        SELECT 1
+        FROM usuarios
+        WHERE empresa_id = %s
+          AND (usuario = %s OR email = %s)
+        LIMIT 1
+        """,
+        (empresa_id, usuario.strip(), email.strip().lower()),
+    ).fetchone()
+
+    if usuario_existente:
+        raise ValueError("Já existe um usuário ou e-mail cadastrado nesta empresa.")
+
+    conn.execute(
+        """
+        INSERT INTO usuarios
+        (empresa_id, nome, email, usuario, senha_hash, perfil, ativo, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """,
+        (
+            empresa_id,
+            nome.strip(),
+            email.strip().lower(),
+            usuario.strip(),
+            gerar_hash_senha(senha.strip()),
+            perfil,
+        ),
+    )
+
+
+def atualizar_usuario_empresa(
+    usuario_id, empresa_id, nome, email, usuario, perfil, ativo, nova_senha=None
+):
+    usuario_existente = conn.execute(
+        """
+        SELECT 1
+        FROM usuarios
+        WHERE empresa_id = %s
+          AND id <> %s
+          AND (usuario = %s OR email = %s)
+        LIMIT 1
+        """,
+        (empresa_id, usuario_id, usuario.strip(), email.strip().lower()),
+    ).fetchone()
+
+    if usuario_existente:
+        raise ValueError("Já existe outro usuário ou e-mail cadastrado nesta empresa.")
+
+    if nova_senha and nova_senha.strip():
+        conn.execute(
+            """
+            UPDATE usuarios
+            SET nome = %s,
+                email = %s,
+                usuario = %s,
+                perfil = %s,
+                ativo = %s,
+                senha_hash = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+              AND empresa_id = %s
+            """,
+            (
+                nome.strip(),
+                email.strip().lower(),
+                usuario.strip(),
+                perfil,
+                ativo,
+                gerar_hash_senha(nova_senha.strip()),
+                usuario_id,
+                empresa_id,
+            ),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE usuarios
+            SET nome = %s,
+                email = %s,
+                usuario = %s,
+                perfil = %s,
+                ativo = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+              AND empresa_id = %s
+            """,
+            (
+                nome.strip(),
+                email.strip().lower(),
+                usuario.strip(),
+                perfil,
+                ativo,
+                usuario_id,
+                empresa_id,
+            ),
+        )
+
+
 def formatar_cnpj(cnpj):
     cnpj = re.sub(r"\D", "", cnpj or "")
     if len(cnpj) == 14:
@@ -229,7 +357,9 @@ def autenticar_usuario(login_digitado, senha_digitada):
 
 def registrar_sessao_usuario(usuario, menu_inicial=None):
     perfil = usuario["perfil"]
-    menu_padrao = menu_inicial or ("Dashboard RH" if perfil in ("admin", "gestor") else "Nova Solicitação")
+    menu_padrao = menu_inicial or (
+        "Dashboard RH" if perfil in ("admin", "gestor") else "Nova Solicitação"
+    )
     token = criar_sessao_login(
         usuario=usuario["usuario"],
         perfil=perfil,
@@ -248,6 +378,7 @@ def registrar_sessao_usuario(usuario, menu_inicial=None):
     st.session_state.menu_atual = menu_padrao
     st.session_state.token_sessao = token
     persistir_query_params()
+
 
 def email_configurada():
     cfg = obter_email_config()
@@ -775,18 +906,28 @@ def criar_tabelas():
     if not coluna_existe("filiais", "licenca"):
         conn.execute("ALTER TABLE filiais ADD COLUMN licenca TEXT")
     if not coluna_existe("filiais", "empresa_id"):
-        conn.execute("ALTER TABLE filiais ADD COLUMN empresa_id BIGINT REFERENCES empresas(id)")
+        conn.execute(
+            "ALTER TABLE filiais ADD COLUMN empresa_id BIGINT REFERENCES empresas(id)"
+        )
     if not coluna_existe("setores", "empresa_id"):
-        conn.execute("ALTER TABLE setores ADD COLUMN empresa_id BIGINT REFERENCES empresas(id)")
+        conn.execute(
+            "ALTER TABLE setores ADD COLUMN empresa_id BIGINT REFERENCES empresas(id)"
+        )
     if not coluna_existe("cargos", "empresa_id"):
-        conn.execute("ALTER TABLE cargos ADD COLUMN empresa_id BIGINT REFERENCES empresas(id)")
+        conn.execute(
+            "ALTER TABLE cargos ADD COLUMN empresa_id BIGINT REFERENCES empresas(id)"
+        )
     if not coluna_existe("colaboradores", "empresa_id"):
-        conn.execute("ALTER TABLE colaboradores ADD COLUMN empresa_id BIGINT REFERENCES empresas(id)")
+        conn.execute(
+            "ALTER TABLE colaboradores ADD COLUMN empresa_id BIGINT REFERENCES empresas(id)"
+        )
 
     if not coluna_existe("clientes", "cpf"):
         conn.execute("ALTER TABLE clientes ADD COLUMN cpf TEXT")
     if not coluna_existe("clientes", "empresa_id"):
-        conn.execute("ALTER TABLE clientes ADD COLUMN empresa_id BIGINT REFERENCES empresas(id)")
+        conn.execute(
+            "ALTER TABLE clientes ADD COLUMN empresa_id BIGINT REFERENCES empresas(id)"
+        )
     if not coluna_existe("clientes", "funcao"):
         conn.execute("ALTER TABLE clientes ADD COLUMN funcao TEXT")
     if not coluna_existe("clientes", "email"):
@@ -815,7 +956,12 @@ def criar_tabelas():
         if not coluna_existe("solicitacoes", coluna):
             if coluna in ["cliente_id", "empresa_id", "atendente_id"]:
                 conn.execute(f"ALTER TABLE solicitacoes ADD COLUMN {coluna} BIGINT")
-            elif coluna in ["data_criacao", "inicio_atendimento", "fim_atendimento", "atribuido_em"]:
+            elif coluna in [
+                "data_criacao",
+                "inicio_atendimento",
+                "fim_atendimento",
+                "atribuido_em",
+            ]:
                 conn.execute(f"ALTER TABLE solicitacoes ADD COLUMN {coluna} TIMESTAMP")
             else:
                 conn.execute(f"ALTER TABLE solicitacoes ADD COLUMN {coluna} TEXT")
@@ -873,7 +1019,9 @@ def gerar_usuario(nome):
     return re.sub(r"[^a-z0-9_]", "", usuario)
 
 
-def criar_sessao_login(usuario, perfil, menu="Dashboard RH", user_id=None, empresa_id=None):
+def criar_sessao_login(
+    usuario, perfil, menu="Dashboard RH", user_id=None, empresa_id=None
+):
     token = str(uuid.uuid4())
     conn.execute(
         """
@@ -968,7 +1116,11 @@ def restaurar_login():
     st.session_state.nome_usuario = usuario.get("nome") or usuario["usuario"]
     st.session_state.perfil = usuario["perfil"]
     st.session_state.plano = usuario.get("plano") or ""
-    st.session_state.menu_atual = sessao["menu"] or ("Dashboard RH" if usuario["perfil"] in ("admin", "gestor") else "Nova Solicitação")
+    st.session_state.menu_atual = sessao["menu"] or (
+        "Dashboard RH"
+        if usuario["perfil"] in ("admin", "gestor")
+        else "Nova Solicitação"
+    )
     st.session_state.token_sessao = token
 
 
@@ -1774,7 +1926,9 @@ if not st.session_state.logado:
             unsafe_allow_html=True,
         )
 
-        usuario_input = st.text_input("Usuário ou e-mail", placeholder="Digite seu usuário ou e-mail")
+        usuario_input = st.text_input(
+            "Usuário ou e-mail", placeholder="Digite seu usuário ou e-mail"
+        )
         senha_input = st.text_input(
             "Senha", type="password", placeholder="Digite sua senha"
         )
@@ -1791,10 +1945,255 @@ if not st.session_state.logado:
                     registrar_sessao_usuario(usuario)
                     st.rerun()
                 elif autenticar_admin(usuario_digitado, senha_digitada):
-                    st.error("O acesso master legado não está habilitado neste fluxo SaaS. Cadastre este usuário na tabela usuarios.")
+                    st.error(
+                        "O acesso master legado não está habilitado neste fluxo SaaS. Cadastre este usuário na tabela usuarios."
+                    )
                 else:
                     st.error("Usuário ou senha inválidos.")
     st.stop()
+
+elif menu == "Usuários da Empresa" and perfil_atual == "admin":
+    exigir_perfil("admin")
+    st.header("Usuários da Empresa")
+
+    empresa_id = get_empresa_id()
+
+    with st.expander("Novo usuário", expanded=True):
+        c1, c2 = st.columns(2)
+
+        with c1:
+            nome_usuario_novo = st.text_input("Nome completo", key="novo_usuario_nome")
+            email_usuario_novo = st.text_input("E-mail", key="novo_usuario_email")
+            usuario_usuario_novo = st.text_input("Usuário", key="novo_usuario_login")
+
+        with c2:
+            perfil_usuario_novo = st.selectbox(
+                "Perfil",
+                ["admin", "gestor", "usuario"],
+                key="novo_usuario_perfil",
+            )
+            senha_usuario_novo = st.text_input(
+                "Senha inicial",
+                type="password",
+                key="novo_usuario_senha",
+            )
+
+        if st.button("Cadastrar usuário", key="btn_cadastrar_usuario_empresa"):
+            if not nome_usuario_novo.strip():
+                st.error("Informe o nome do usuário.")
+            elif not email_usuario_novo.strip():
+                st.error("Informe o e-mail do usuário.")
+            elif not usuario_usuario_novo.strip():
+                st.error("Informe o login do usuário.")
+            elif not senha_usuario_novo.strip() or len(senha_usuario_novo.strip()) < 6:
+                st.error("A senha inicial deve ter pelo menos 6 caracteres.")
+            else:
+                try:
+                    criar_usuario_empresa(
+                        empresa_id=empresa_id,
+                        nome=nome_usuario_novo,
+                        email=email_usuario_novo,
+                        usuario=usuario_usuario_novo,
+                        senha=senha_usuario_novo,
+                        perfil=perfil_usuario_novo,
+                    )
+                    st.success("Usuário cadastrado com sucesso.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+                except Exception as exc:
+                    st.error(f"Erro ao cadastrar usuário: {exc}")
+
+    st.markdown("---")
+    st.subheader("Usuários cadastrados")
+
+    if "usuario_empresa_editando_id" not in st.session_state:
+        st.session_state.usuario_empresa_editando_id = None
+
+    usuarios_empresa = obter_usuarios_empresa(empresa_id)
+
+    if not usuarios_empresa:
+        st.info("Nenhum usuário cadastrado para esta empresa.")
+    else:
+        usuarios_empresa, _, _ = paginar_registros(
+            usuarios_empresa,
+            "pagina_usuarios_empresa",
+            page_size=10,
+        )
+
+        for usuario_row in usuarios_empresa:
+            usuario_id = usuario_row["id"]
+
+            with st.container(border=True):
+                col1, col2, col3 = st.columns([2.5, 2.2, 2.3])
+
+                with col1:
+                    st.write(f"**{usuario_row['nome']}**")
+                    st.caption(usuario_row["usuario"])
+
+                with col2:
+                    st.write(usuario_row["email"] or "Sem e-mail")
+                    st.caption(f"Perfil: {usuario_row['perfil']}")
+
+                with col3:
+                    b1, b2 = st.columns(2)
+
+                    with b1:
+                        status_label = (
+                            "Ativo" if bool(usuario_row["ativo"]) else "Inativo"
+                        )
+                        st.write(status_label)
+
+                    with b2:
+                        if st.button(
+                            "Alterar",
+                            key=f"alterar_usuario_empresa_{usuario_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.usuario_empresa_editando_id = usuario_id
+                            st.rerun()
+
+                if st.session_state.usuario_empresa_editando_id == usuario_id:
+                    ed1, ed2 = st.columns(2)
+
+                    with ed1:
+                        edit_nome = st.text_input(
+                            "Nome",
+                            value=usuario_row["nome"] or "",
+                            key=f"edit_usuario_empresa_nome_{usuario_id}",
+                        )
+                        edit_email = st.text_input(
+                            "E-mail",
+                            value=usuario_row["email"] or "",
+                            key=f"edit_usuario_empresa_email_{usuario_id}",
+                        )
+                        edit_usuario = st.text_input(
+                            "Usuário",
+                            value=usuario_row["usuario"] or "",
+                            key=f"edit_usuario_empresa_login_{usuario_id}",
+                        )
+
+                    with ed2:
+                        perfis = ["admin", "gestor", "usuario"]
+                        idx_perfil = (
+                            perfis.index(usuario_row["perfil"])
+                            if usuario_row["perfil"] in perfis
+                            else 2
+                        )
+
+                        edit_perfil = st.selectbox(
+                            "Perfil",
+                            perfis,
+                            index=idx_perfil,
+                            key=f"edit_usuario_empresa_perfil_{usuario_id}",
+                        )
+
+                        edit_ativo = st.checkbox(
+                            "Ativo",
+                            value=bool(usuario_row["ativo"]),
+                            key=f"edit_usuario_empresa_ativo_{usuario_id}",
+                        )
+
+                        edit_senha = st.text_input(
+                            "Nova senha (opcional)",
+                            type="password",
+                            key=f"edit_usuario_empresa_senha_{usuario_id}",
+                        )
+
+                    a1, a2 = st.columns(2)
+
+                    with a1:
+                        if st.button(
+                            "Salvar alteração",
+                            key=f"salvar_usuario_empresa_{usuario_id}",
+                            use_container_width=True,
+                        ):
+                            try:
+                                atualizar_usuario_empresa(
+                                    usuario_id=usuario_id,
+                                    empresa_id=empresa_id,
+                                    nome=edit_nome,
+                                    email=edit_email,
+                                    usuario=edit_usuario,
+                                    perfil=edit_perfil,
+                                    ativo=edit_ativo,
+                                    nova_senha=edit_senha,
+                                )
+                                st.session_state.usuario_empresa_editando_id = None
+                                st.success("Usuário atualizado com sucesso.")
+                                st.rerun()
+                            except ValueError as exc:
+                                st.error(str(exc))
+                            except Exception as exc:
+                                st.error(f"Erro ao atualizar usuário: {exc}")
+
+                    with a2:
+                        if st.button(
+                            "Cancelar alteração",
+                            key=f"cancelar_usuario_empresa_{usuario_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.usuario_empresa_editando_id = None
+                            st.rerun()
+
+
+def validar_limite_usuarios_empresa(empresa_id):
+    empresa = conn.execute(
+        """
+        SELECT limite_usuarios
+        FROM empresas
+        WHERE id = %s
+        LIMIT 1
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    total = conn.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM usuarios
+        WHERE empresa_id = %s
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    limite = empresa["limite_usuarios"] if empresa else None
+    quantidade = total["total"] if total else 0
+
+    if limite is None:
+        return True
+
+    return quantidade < limite
+
+
+def validar_limite_colaboradores(empresa_id):
+    empresa = conn.execute(
+        """
+        SELECT limite_colaboradores
+        FROM empresas
+        WHERE id = %s
+        LIMIT 1
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    total = conn.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM colaboradores
+        WHERE empresa_id = %s
+          AND ativo = TRUE
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    limite = empresa["limite_colaboradores"] if empresa else None
+    quantidade = total["total"] if total else 0
+
+    if limite is None:
+        return True
+
+    return quantidade < limite
 
 
 def aplicar_design_portal():
@@ -1895,6 +2294,7 @@ def render_sidebar_menu(menu_options, current_menu, logo_b64):
         "Cadastro de Filiais": "clientes",
         "Cadastro de Setores": "cadastros",
         "Cadastro de Cargos": "atendentes",
+        "Usuários da Empresa": "clientes",
     }
 
     if logo_b64:
@@ -1962,6 +2362,7 @@ menu_options_admin = [
     "Cadastro de Filiais",
     "Cadastro de Setores",
     "Cadastro de Cargos",
+    "Usuários da Empresa",
 ]
 
 menu_options_gestor = [
@@ -2000,7 +2401,11 @@ with st.sidebar:
     st.markdown('<div style="flex:1;"></div>', unsafe_allow_html=True)
     st.markdown('<div class="bv-sidebar-divider"></div>', unsafe_allow_html=True)
 
-    nome_usuario = (st.session_state.get("nome_usuario") or st.session_state.usuario or "").replace("_", " ").strip()
+    nome_usuario = (
+        (st.session_state.get("nome_usuario") or st.session_state.usuario or "")
+        .replace("_", " ")
+        .strip()
+    )
     partes_nome_usuario = [p for p in nome_usuario.split() if p]
     if len(partes_nome_usuario) >= 2:
         iniciais = (partes_nome_usuario[0][0] + partes_nome_usuario[1][0]).upper()
@@ -2637,6 +3042,49 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
 
     empresa_id = get_empresa_id()
 
+    empresa_info = conn.execute(
+        """
+        SELECT plano, limite_colaboradores, limite_usuarios
+        FROM empresas
+        WHERE id = %s
+        LIMIT 1
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    total_usuarios_empresa = conn.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM usuarios
+        WHERE empresa_id = %s
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    total_colaboradores_ativos_empresa = conn.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM colaboradores
+        WHERE empresa_id = %s
+          AND ativo = TRUE
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    plano_nome = (empresa_info["plano"] if empresa_info and empresa_info.get("plano") else "não definido")
+    limite_usuarios = empresa_info["limite_usuarios"] if empresa_info else None
+    limite_colaboradores = empresa_info["limite_colaboradores"] if empresa_info else None
+    usados_usuarios = total_usuarios_empresa["total"] if total_usuarios_empresa else 0
+    usados_colaboradores = (
+        total_colaboradores_ativos_empresa["total"]
+        if total_colaboradores_ativos_empresa
+        else 0
+    )
+
+    st.info(
+        f"Plano atual: {plano_nome} • Usuários: {usados_usuarios} / {limite_usuarios if limite_usuarios is not None else 'ilimitado'} • Colaboradores ativos: {usados_colaboradores} / {limite_colaboradores if limite_colaboradores is not None else 'ilimitado'}"
+    )
+
     dados = conn.execute(
         """
         SELECT
@@ -2673,24 +3121,41 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         st.info("Nenhum colaborador cadastrado ainda.")
     else:
         df["data_admissao"] = pd.to_datetime(df["data_admissao"], errors="coerce")
-        df["data_desligamento"] = pd.to_datetime(df["data_desligamento"], errors="coerce")
+        df["data_desligamento"] = pd.to_datetime(
+            df["data_desligamento"], errors="coerce"
+        )
         df["data_nascimento"] = pd.to_datetime(df["data_nascimento"], errors="coerce")
 
         anos_admissao = df["data_admissao"].dt.year.dropna().astype(int).tolist()
-        anos_desligamento = df["data_desligamento"].dt.year.dropna().astype(int).tolist()
-        anos_disponiveis = sorted(list(set(anos_admissao + anos_desligamento)), reverse=True)
+        anos_desligamento = (
+            df["data_desligamento"].dt.year.dropna().astype(int).tolist()
+        )
+        anos_disponiveis = sorted(
+            list(set(anos_admissao + anos_desligamento)), reverse=True
+        )
         if not anos_disponiveis:
             anos_disponiveis = [datetime.now().year]
 
         meses_map = {
-            1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
-            5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
-            9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro",
+            1: "Janeiro",
+            2: "Fevereiro",
+            3: "Março",
+            4: "Abril",
+            5: "Maio",
+            6: "Junho",
+            7: "Julho",
+            8: "Agosto",
+            9: "Setembro",
+            10: "Outubro",
+            11: "Novembro",
+            12: "Dezembro",
         }
 
         f1, f2 = st.columns(2)
         with f1:
-            ano_sel = st.selectbox("Ano", anos_disponiveis, index=0, key="dashboard_rh_ano")
+            ano_sel = st.selectbox(
+                "Ano", anos_disponiveis, index=0, key="dashboard_rh_ano"
+            )
         with f2:
             mes_atual = datetime.now().month
             mes_sel = st.selectbox(
@@ -2705,11 +3170,27 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         registros_ativos = len(df[df["ativo"] == True])
         afastados_total = len(df[df["status"] == "Afastado"])
 
-        admissoes_periodo = len(df[(df["data_admissao"].dt.year == ano_sel) & (df["data_admissao"].dt.month == mes_sel)])
-        desligamentos_periodo = len(df[(df["data_desligamento"].dt.year == ano_sel) & (df["data_desligamento"].dt.month == mes_sel)])
-        turnover = (desligamentos_periodo / registros_ativos * 100) if registros_ativos > 0 else 0
+        admissoes_periodo = len(
+            df[
+                (df["data_admissao"].dt.year == ano_sel)
+                & (df["data_admissao"].dt.month == mes_sel)
+            ]
+        )
+        desligamentos_periodo = len(
+            df[
+                (df["data_desligamento"].dt.year == ano_sel)
+                & (df["data_desligamento"].dt.month == mes_sel)
+            ]
+        )
+        turnover = (
+            (desligamentos_periodo / registros_ativos * 100)
+            if registros_ativos > 0
+            else 0
+        )
 
-        aniversariantes_mes = df[df["data_nascimento"].notna() & (df["data_nascimento"].dt.month == mes_sel)].copy()
+        aniversariantes_mes = df[
+            df["data_nascimento"].notna() & (df["data_nascimento"].dt.month == mes_sel)
+        ].copy()
         if not aniversariantes_mes.empty:
             aniversariantes_mes["dia"] = aniversariantes_mes["data_nascimento"].dt.day
             aniversariantes_mes = aniversariantes_mes.sort_values(["dia", "nome"])
@@ -2729,7 +3210,15 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
             df.groupby(["filial", "setor", "cargo", "status"], dropna=False)["id"]
             .count()
             .reset_index()
-            .rename(columns={"id": "Quantidade", "filial": "Filial", "setor": "Setor", "cargo": "Cargo", "status": "Status"})
+            .rename(
+                columns={
+                    "id": "Quantidade",
+                    "filial": "Filial",
+                    "setor": "Setor",
+                    "cargo": "Cargo",
+                    "status": "Status",
+                }
+            )
             .sort_values(["Filial", "Setor", "Cargo", "Status"])
         )
         resumo["Filial"] = resumo["Filial"].fillna("Sem filial")
@@ -2744,13 +3233,33 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         if aniversariantes_mes.empty:
             st.info("Nenhum aniversariante neste mês.")
         else:
-            tabela_aniversariantes = aniversariantes_mes[["dia", "nome", "matricula", "filial", "setor", "cargo", "status"]].copy()
-            tabela_aniversariantes["filial"] = tabela_aniversariantes["filial"].fillna("Sem filial")
-            tabela_aniversariantes["setor"] = tabela_aniversariantes["setor"].fillna("Sem setor")
-            tabela_aniversariantes["cargo"] = tabela_aniversariantes["cargo"].fillna("Sem cargo")
-            tabela_aniversariantes["status"] = tabela_aniversariantes["status"].fillna("Sem status")
-            tabela_aniversariantes.columns = ["Dia", "Nome", "Matrícula", "Filial", "Setor", "Cargo", "Status"]
-            st.dataframe(tabela_aniversariantes, use_container_width=True, hide_index=True)
+            tabela_aniversariantes = aniversariantes_mes[
+                ["dia", "nome", "matricula", "filial", "setor", "cargo", "status"]
+            ].copy()
+            tabela_aniversariantes["filial"] = tabela_aniversariantes["filial"].fillna(
+                "Sem filial"
+            )
+            tabela_aniversariantes["setor"] = tabela_aniversariantes["setor"].fillna(
+                "Sem setor"
+            )
+            tabela_aniversariantes["cargo"] = tabela_aniversariantes["cargo"].fillna(
+                "Sem cargo"
+            )
+            tabela_aniversariantes["status"] = tabela_aniversariantes["status"].fillna(
+                "Sem status"
+            )
+            tabela_aniversariantes.columns = [
+                "Dia",
+                "Nome",
+                "Matrícula",
+                "Filial",
+                "Setor",
+                "Cargo",
+                "Status",
+            ]
+            st.dataframe(
+                tabela_aniversariantes, use_container_width=True, hide_index=True
+            )
 
 elif menu == "Cadastro de Filiais" and perfil_atual in ("admin", "gestor"):
     exigir_perfil("admin", "gestor")
@@ -2777,7 +3286,14 @@ elif menu == "Cadastro de Filiais" and perfil_atual in ("admin", "gestor"):
                     INSERT INTO filiais (empresa_id, nome, cidade, uf, licenca, ativo)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (empresa_id, nome_filial.strip(), cidade_filial.strip(), uf_filial.strip().upper(), licenca_filial.strip(), ativo_filial),
+                    (
+                        empresa_id,
+                        nome_filial.strip(),
+                        cidade_filial.strip(),
+                        uf_filial.strip().upper(),
+                        licenca_filial.strip(),
+                        ativo_filial,
+                    ),
                 )
                 st.success("Filial cadastrada com sucesso.")
                 st.rerun()
@@ -2799,14 +3315,18 @@ elif menu == "Cadastro de Filiais" and perfil_atual in ("admin", "gestor"):
     ).fetchall()
 
     if filiais:
-        filiais, _, _ = paginar_registros(filiais, "pagina_filiais_cadastro", page_size=10)
+        filiais, _, _ = paginar_registros(
+            filiais, "pagina_filiais_cadastro", page_size=10
+        )
         for filial in filiais:
             filial_id = filial["id"]
             with st.container(border=True):
                 col1, col2, col3 = st.columns([3.4, 1.5, 3.1])
                 with col1:
                     st.write(f"**ID {filial['id']} - {filial['nome']}**")
-                    localizacao = " • ".join([x for x in [filial["cidade"] or "", filial["uf"] or ""] if x])
+                    localizacao = " • ".join(
+                        [x for x in [filial["cidade"] or "", filial["uf"] or ""] if x]
+                    )
                     st.caption(localizacao)
                     st.caption(f"Licença: {filial['licenca'] or 'Não informada'}")
                 with col2:
@@ -2815,37 +3335,88 @@ elif menu == "Cadastro de Filiais" and perfil_atual in ("admin", "gestor"):
                     b1, b2, b3 = st.columns(3)
                     with b1:
                         if bool(filial["ativo"]):
-                            if st.button("Inativar", key=f"inativar_filial_{filial_id}", use_container_width=True):
-                                conn.execute("UPDATE filiais SET ativo = FALSE WHERE id = %s AND empresa_id = %s", (filial_id, empresa_id))
+                            if st.button(
+                                "Inativar",
+                                key=f"inativar_filial_{filial_id}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE filiais SET ativo = FALSE WHERE id = %s AND empresa_id = %s",
+                                    (filial_id, empresa_id),
+                                )
                                 st.rerun()
                         else:
-                            if st.button("Ativar", key=f"ativar_filial_{filial_id}", use_container_width=True):
-                                conn.execute("UPDATE filiais SET ativo = TRUE WHERE id = %s AND empresa_id = %s", (filial_id, empresa_id))
+                            if st.button(
+                                "Ativar",
+                                key=f"ativar_filial_{filial_id}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE filiais SET ativo = TRUE WHERE id = %s AND empresa_id = %s",
+                                    (filial_id, empresa_id),
+                                )
                                 st.rerun()
                     with b2:
-                        if st.button("Excluir", key=f"excluir_filial_{filial_id}", use_container_width=True):
-                            possui_colaboradores = conn.execute("SELECT 1 FROM colaboradores WHERE filial_id = %s AND empresa_id = %s LIMIT 1", (filial_id, empresa_id)).fetchone()
+                        if st.button(
+                            "Excluir",
+                            key=f"excluir_filial_{filial_id}",
+                            use_container_width=True,
+                        ):
+                            possui_colaboradores = conn.execute(
+                                "SELECT 1 FROM colaboradores WHERE filial_id = %s AND empresa_id = %s LIMIT 1",
+                                (filial_id, empresa_id),
+                            ).fetchone()
                             if possui_colaboradores:
-                                st.warning("Esta filial possui colaboradores vinculados. Inative ao invés de excluir.")
+                                st.warning(
+                                    "Esta filial possui colaboradores vinculados. Inative ao invés de excluir."
+                                )
                             else:
-                                conn.execute("DELETE FROM filiais WHERE id = %s AND empresa_id = %s", (filial_id, empresa_id))
+                                conn.execute(
+                                    "DELETE FROM filiais WHERE id = %s AND empresa_id = %s",
+                                    (filial_id, empresa_id),
+                                )
                                 st.success("Filial excluída.")
                                 st.rerun()
                     with b3:
-                        if st.button("Alterar", key=f"alterar_filial_{filial_id}", use_container_width=True):
+                        if st.button(
+                            "Alterar",
+                            key=f"alterar_filial_{filial_id}",
+                            use_container_width=True,
+                        ):
                             st.session_state.filial_editando_id = filial_id
                             st.rerun()
                 if st.session_state.filial_editando_id == filial_id:
                     e1, e2, e3 = st.columns(3)
                     with e1:
-                        novo_nome_filial = st.text_input("Nome da Filial", value=filial["nome"] or "", key=f"edit_filial_nome_{filial_id}")
-                        nova_cidade_filial = st.text_input("Cidade", value=filial["cidade"] or "", key=f"edit_filial_cidade_{filial_id}")
+                        novo_nome_filial = st.text_input(
+                            "Nome da Filial",
+                            value=filial["nome"] or "",
+                            key=f"edit_filial_nome_{filial_id}",
+                        )
+                        nova_cidade_filial = st.text_input(
+                            "Cidade",
+                            value=filial["cidade"] or "",
+                            key=f"edit_filial_cidade_{filial_id}",
+                        )
                     with e2:
-                        nova_uf_filial = st.text_input("UF", value=filial["uf"] or "", key=f"edit_filial_uf_{filial_id}", max_chars=2)
-                        nova_licenca_filial = st.text_input("Código de Licença", value=filial["licenca"] or "", key=f"edit_filial_licenca_{filial_id}")
+                        nova_uf_filial = st.text_input(
+                            "UF",
+                            value=filial["uf"] or "",
+                            key=f"edit_filial_uf_{filial_id}",
+                            max_chars=2,
+                        )
+                        nova_licenca_filial = st.text_input(
+                            "Código de Licença",
+                            value=filial["licenca"] or "",
+                            key=f"edit_filial_licenca_{filial_id}",
+                        )
                     a1, a2 = st.columns(2)
                     with a1:
-                        if st.button("Salvar alteração", key=f"salvar_filial_{filial_id}", use_container_width=True):
+                        if st.button(
+                            "Salvar alteração",
+                            key=f"salvar_filial_{filial_id}",
+                            use_container_width=True,
+                        ):
                             if not novo_nome_filial.strip():
                                 st.error("Informe o nome da filial.")
                             else:
@@ -2855,13 +3426,24 @@ elif menu == "Cadastro de Filiais" and perfil_atual in ("admin", "gestor"):
                                     SET nome = %s, cidade = %s, uf = %s, licenca = %s
                                     WHERE id = %s AND empresa_id = %s
                                     """,
-                                    (novo_nome_filial.strip(), nova_cidade_filial.strip(), nova_uf_filial.strip().upper(), nova_licenca_filial.strip(), filial_id, empresa_id),
+                                    (
+                                        novo_nome_filial.strip(),
+                                        nova_cidade_filial.strip(),
+                                        nova_uf_filial.strip().upper(),
+                                        nova_licenca_filial.strip(),
+                                        filial_id,
+                                        empresa_id,
+                                    ),
                                 )
                                 st.session_state.filial_editando_id = None
                                 st.success("Filial atualizada com sucesso.")
                                 st.rerun()
                     with a2:
-                        if st.button("Cancelar alteração", key=f"cancelar_filial_{filial_id}", use_container_width=True):
+                        if st.button(
+                            "Cancelar alteração",
+                            key=f"cancelar_filial_{filial_id}",
+                            use_container_width=True,
+                        ):
                             st.session_state.filial_editando_id = None
                             st.rerun()
     else:
@@ -2873,8 +3455,7 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
     empresa_id = get_empresa_id()
 
     filiais = conn.execute(
-        "SELECT id, nome FROM filiais WHERE empresa_id = %s AND ativo = TRUE ORDER BY nome"
-    ,
+        "SELECT id, nome FROM filiais WHERE empresa_id = %s AND ativo = TRUE ORDER BY nome",
         (empresa_id,),
     ).fetchall()
 
@@ -2911,16 +3492,22 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
             if filiais:
                 filial_labels = [row["nome"] for row in filiais]
                 filial_sel = st.selectbox("Filial", filial_labels, key="colab_filial")
-                filial_id = next(row["id"] for row in filiais if row["nome"] == filial_sel)
+                filial_id = next(
+                    row["id"] for row in filiais if row["nome"] == filial_sel
+                )
             else:
                 filial_id = None
-                st.warning("Cadastre pelo menos uma filial antes de criar colaboradores.")
+                st.warning(
+                    "Cadastre pelo menos uma filial antes de criar colaboradores."
+                )
 
         with c3:
             if setores:
                 setor_labels = [row["nome"] for row in setores]
                 setor_sel = st.selectbox("Setor", setor_labels, key="colab_setor")
-                setor_id = next(row["id"] for row in setores if row["nome"] == setor_sel)
+                setor_id = next(
+                    row["id"] for row in setores if row["nome"] == setor_sel
+                )
             else:
                 setor_id = None
                 st.info("Nenhum setor ativo cadastrado.")
@@ -2933,7 +3520,11 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
                 cargo_id = None
                 st.info("Nenhum cargo ativo cadastrado.")
 
-            status = st.selectbox("Status", ["Ativo", "Afastado", "Férias", "Desligado"], key="colab_status")
+            status = st.selectbox(
+                "Status",
+                ["Ativo", "Afastado", "Férias", "Desligado"],
+                key="colab_status",
+            )
             ativo = st.checkbox("Registro ativo", value=True, key="colab_ativo")
 
         if st.button("Cadastrar Colaborador", key="btn_cadastrar_colaborador"):
@@ -2941,6 +3532,8 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
                 st.error("Informe o nome do colaborador.")
             elif not filial_id:
                 st.error("É necessário vincular o colaborador a uma filial.")
+            elif not validar_limite_colaboradores(empresa_id):
+                st.error("Seu plano atingiu o limite de colaboradores ativos.")
             else:
                 conn.execute(
                     """
@@ -3024,7 +3617,9 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
     mapa_cargos = {row["id"]: row["nome"] for row in cargos}
 
     if colaboradores:
-        colaboradores, _, _ = paginar_registros(colaboradores, "pagina_colaboradores_cadastro", page_size=10)
+        colaboradores, _, _ = paginar_registros(
+            colaboradores, "pagina_colaboradores_cadastro", page_size=10
+        )
 
         for colab in colaboradores:
             colaborador_id = colab["id"]
@@ -3034,7 +3629,9 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
 
                 with col1:
                     st.write(f"**{colab['nome']}**")
-                    subtitulo = " • ".join([x for x in [colab["matricula"] or "", colab["cpf"] or ""] if x])
+                    subtitulo = " • ".join(
+                        [x for x in [colab["matricula"] or "", colab["cpf"] or ""] if x]
+                    )
                     st.caption(subtitulo)
 
                 with col2:
@@ -3051,11 +3648,21 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
 
                     with b1:
                         if bool(colab["ativo"]):
-                            if st.button("Inativar", key=f"abrir_inativacao_colab_{colaborador_id}", use_container_width=True):
-                                st.session_state[f"inativando_colab_{colaborador_id}"] = True
+                            if st.button(
+                                "Inativar",
+                                key=f"abrir_inativacao_colab_{colaborador_id}",
+                                use_container_width=True,
+                            ):
+                                st.session_state[
+                                    f"inativando_colab_{colaborador_id}"
+                                ] = True
                                 st.rerun()
                         else:
-                            if st.button("Ativar", key=f"ativar_colab_{colaborador_id}", use_container_width=True):
+                            if st.button(
+                                "Ativar",
+                                key=f"ativar_colab_{colaborador_id}",
+                                use_container_width=True,
+                            ):
                                 conn.execute(
                                     """
                                     UPDATE colaboradores
@@ -3070,13 +3677,24 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
                                 st.rerun()
 
                     with b2:
-                        if st.button("Excluir", key=f"excluir_colab_{colaborador_id}", use_container_width=True):
-                            conn.execute("DELETE FROM colaboradores WHERE id = %s", (colaborador_id,))
+                        if st.button(
+                            "Excluir",
+                            key=f"excluir_colab_{colaborador_id}",
+                            use_container_width=True,
+                        ):
+                            conn.execute(
+                                "DELETE FROM colaboradores WHERE id = %s",
+                                (colaborador_id,),
+                            )
                             st.success("Colaborador excluído.")
                             st.rerun()
 
                     with b3:
-                        if st.button("Alterar", key=f"alterar_colab_{colaborador_id}", use_container_width=True):
+                        if st.button(
+                            "Alterar",
+                            key=f"alterar_colab_{colaborador_id}",
+                            use_container_width=True,
+                        ):
                             st.session_state.colaborador_editando_id = colaborador_id
                             st.rerun()
 
@@ -3100,9 +3718,21 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
                     x1, x2 = st.columns(2)
 
                     with x1:
-                        if st.button("Confirmar inativação", key=f"confirmar_inativacao_{colaborador_id}", use_container_width=True):
-                            novo_status = "Afastado" if motivo_inativacao == "Afastamento" else "Desligado"
-                            nova_data_desligamento = data_inativacao if motivo_inativacao == "Demissão" else None
+                        if st.button(
+                            "Confirmar inativação",
+                            key=f"confirmar_inativacao_{colaborador_id}",
+                            use_container_width=True,
+                        ):
+                            novo_status = (
+                                "Afastado"
+                                if motivo_inativacao == "Afastamento"
+                                else "Desligado"
+                            )
+                            nova_data_desligamento = (
+                                data_inativacao
+                                if motivo_inativacao == "Demissão"
+                                else None
+                            )
 
                             conn.execute(
                                 """
@@ -3115,13 +3745,21 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
                                 (novo_status, nova_data_desligamento, colaborador_id),
                             )
 
-                            st.session_state[f"inativando_colab_{colaborador_id}"] = False
+                            st.session_state[f"inativando_colab_{colaborador_id}"] = (
+                                False
+                            )
                             st.success("Colaborador inativado com sucesso.")
                             st.rerun()
 
                     with x2:
-                        if st.button("Cancelar inativação", key=f"cancelar_inativacao_{colaborador_id}", use_container_width=True):
-                            st.session_state[f"inativando_colab_{colaborador_id}"] = False
+                        if st.button(
+                            "Cancelar inativação",
+                            key=f"cancelar_inativacao_{colaborador_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state[f"inativando_colab_{colaborador_id}"] = (
+                                False
+                            )
                             st.rerun()
 
                 if st.session_state.colaborador_editando_id == colaborador_id:
@@ -3130,53 +3768,127 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
                     e1, e2, e3 = st.columns(3)
 
                     with e1:
-                        nova_matricula = st.text_input("Matrícula", value=colab["matricula"] or "", key=f"edit_colab_matricula_{colaborador_id}")
-                        novo_nome = st.text_input("Nome completo", value=colab["nome"] or "", key=f"edit_colab_nome_{colaborador_id}")
-                        novo_cpf = st.text_input("CPF", value=colab["cpf"] or "", key=f"edit_colab_cpf_{colaborador_id}")
+                        nova_matricula = st.text_input(
+                            "Matrícula",
+                            value=colab["matricula"] or "",
+                            key=f"edit_colab_matricula_{colaborador_id}",
+                        )
+                        novo_nome = st.text_input(
+                            "Nome completo",
+                            value=colab["nome"] or "",
+                            key=f"edit_colab_nome_{colaborador_id}",
+                        )
+                        novo_cpf = st.text_input(
+                            "CPF",
+                            value=colab["cpf"] or "",
+                            key=f"edit_colab_cpf_{colaborador_id}",
+                        )
 
                     with e2:
-                        novo_email = st.text_input("E-mail", value=colab["email"] or "", key=f"edit_colab_email_{colaborador_id}")
-                        novo_telefone = st.text_input("Telefone", value=colab["telefone"] or "", key=f"edit_colab_telefone_{colaborador_id}")
+                        novo_email = st.text_input(
+                            "E-mail",
+                            value=colab["email"] or "",
+                            key=f"edit_colab_email_{colaborador_id}",
+                        )
+                        novo_telefone = st.text_input(
+                            "Telefone",
+                            value=colab["telefone"] or "",
+                            key=f"edit_colab_telefone_{colaborador_id}",
+                        )
 
-                        filial_labels = [row["nome"] for row in filiais] if filiais else []
+                        filial_labels = (
+                            [row["nome"] for row in filiais] if filiais else []
+                        )
                         filial_atual = mapa_filiais.get(colab["filial_id"])
                         if filial_labels:
-                            idx_filial = filial_labels.index(filial_atual) if filial_atual in filial_labels else 0
-                            filial_edit_nome = st.selectbox("Filial", filial_labels, index=idx_filial, key=f"edit_colab_filial_{colaborador_id}")
-                            nova_filial_id = next(row["id"] for row in filiais if row["nome"] == filial_edit_nome)
+                            idx_filial = (
+                                filial_labels.index(filial_atual)
+                                if filial_atual in filial_labels
+                                else 0
+                            )
+                            filial_edit_nome = st.selectbox(
+                                "Filial",
+                                filial_labels,
+                                index=idx_filial,
+                                key=f"edit_colab_filial_{colaborador_id}",
+                            )
+                            nova_filial_id = next(
+                                row["id"]
+                                for row in filiais
+                                if row["nome"] == filial_edit_nome
+                            )
                         else:
                             nova_filial_id = colab["filial_id"]
 
                     with e3:
-                        setor_labels = [row["nome"] for row in setores] if setores else []
+                        setor_labels = (
+                            [row["nome"] for row in setores] if setores else []
+                        )
                         setor_atual = mapa_setores.get(colab["setor_id"])
                         if setor_labels:
-                            idx_setor = setor_labels.index(setor_atual) if setor_atual in setor_labels else 0
-                            setor_edit_nome = st.selectbox("Setor", setor_labels, index=idx_setor, key=f"edit_colab_setor_{colaborador_id}")
-                            novo_setor_id = next(row["id"] for row in setores if row["nome"] == setor_edit_nome)
+                            idx_setor = (
+                                setor_labels.index(setor_atual)
+                                if setor_atual in setor_labels
+                                else 0
+                            )
+                            setor_edit_nome = st.selectbox(
+                                "Setor",
+                                setor_labels,
+                                index=idx_setor,
+                                key=f"edit_colab_setor_{colaborador_id}",
+                            )
+                            novo_setor_id = next(
+                                row["id"]
+                                for row in setores
+                                if row["nome"] == setor_edit_nome
+                            )
                         else:
                             novo_setor_id = colab["setor_id"]
 
                         cargo_labels = [row["nome"] for row in cargos] if cargos else []
                         cargo_atual = mapa_cargos.get(colab["cargo_id"])
                         if cargo_labels:
-                            idx_cargo = cargo_labels.index(cargo_atual) if cargo_atual in cargo_labels else 0
-                            cargo_edit_nome = st.selectbox("Cargo", cargo_labels, index=idx_cargo, key=f"edit_colab_cargo_{colaborador_id}")
-                            novo_cargo_id = next(row["id"] for row in cargos if row["nome"] == cargo_edit_nome)
+                            idx_cargo = (
+                                cargo_labels.index(cargo_atual)
+                                if cargo_atual in cargo_labels
+                                else 0
+                            )
+                            cargo_edit_nome = st.selectbox(
+                                "Cargo",
+                                cargo_labels,
+                                index=idx_cargo,
+                                key=f"edit_colab_cargo_{colaborador_id}",
+                            )
+                            novo_cargo_id = next(
+                                row["id"]
+                                for row in cargos
+                                if row["nome"] == cargo_edit_nome
+                            )
                         else:
                             novo_cargo_id = colab["cargo_id"]
 
                         novo_status = st.selectbox(
                             "Status",
                             ["Ativo", "Afastado", "Férias", "Desligado"],
-                            index=(["Ativo", "Afastado", "Férias", "Desligado"].index(colab["status"]) if colab["status"] in ["Ativo", "Afastado", "Férias", "Desligado"] else 0),
+                            index=(
+                                ["Ativo", "Afastado", "Férias", "Desligado"].index(
+                                    colab["status"]
+                                )
+                                if colab["status"]
+                                in ["Ativo", "Afastado", "Férias", "Desligado"]
+                                else 0
+                            ),
                             key=f"edit_colab_status_{colaborador_id}",
                         )
 
                     a1, a2 = st.columns(2)
 
                     with a1:
-                        if st.button("Salvar alteração", key=f"salvar_colab_{colaborador_id}", use_container_width=True):
+                        if st.button(
+                            "Salvar alteração",
+                            key=f"salvar_colab_{colaborador_id}",
+                            use_container_width=True,
+                        ):
                             if not novo_nome.strip():
                                 st.error("Informe o nome do colaborador.")
                             else:
@@ -3212,7 +3924,11 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
                                 st.rerun()
 
                     with a2:
-                        if st.button("Cancelar alteração", key=f"cancelar_colab_{colaborador_id}", use_container_width=True):
+                        if st.button(
+                            "Cancelar alteração",
+                            key=f"cancelar_colab_{colaborador_id}",
+                            use_container_width=True,
+                        ):
                             st.session_state.colaborador_editando_id = None
                             st.rerun()
     else:
@@ -3230,7 +3946,10 @@ elif menu == "Cadastro de Setores" and perfil_atual in ("admin", "gestor"):
             if not nome_setor.strip():
                 st.error("Informe o nome do setor.")
             else:
-                conn.execute("INSERT INTO setores (empresa_id, nome, ativo) VALUES (%s, %s, %s)", (empresa_id, nome_setor.strip(), ativo_setor))
+                conn.execute(
+                    "INSERT INTO setores (empresa_id, nome, ativo) VALUES (%s, %s, %s)",
+                    (empresa_id, nome_setor.strip(), ativo_setor),
+                )
                 st.success("Setor cadastrado com sucesso.")
                 st.rerun()
 
@@ -3239,44 +3958,107 @@ elif menu == "Cadastro de Setores" and perfil_atual in ("admin", "gestor"):
     if "setor_editando_id" not in st.session_state:
         st.session_state.setor_editando_id = None
 
-    setores = conn.execute("SELECT id, nome, ativo FROM setores WHERE empresa_id = %s ORDER BY id", (empresa_id,)).fetchall()
+    setores = conn.execute(
+        "SELECT id, nome, ativo FROM setores WHERE empresa_id = %s ORDER BY id",
+        (empresa_id,),
+    ).fetchall()
     if setores:
-        setores, _, _ = paginar_registros(setores, "pagina_setores_cadastro", page_size=10)
+        setores, _, _ = paginar_registros(
+            setores, "pagina_setores_cadastro", page_size=10
+        )
         for setor in setores:
             setor_id = setor["id"]
             with st.container(border=True):
                 col1, col2, col3 = st.columns([2.2, 1.2, 3.2])
-                with col1: st.write(f"**ID {setor['id']} - {setor['nome']}**")
-                with col2: st.write("Ativo" if bool(setor["ativo"]) else "Inativo")
+                with col1:
+                    st.write(f"**ID {setor['id']} - {setor['nome']}**")
+                with col2:
+                    st.write("Ativo" if bool(setor["ativo"]) else "Inativo")
                 with col3:
                     b1, b2, b3 = st.columns(3)
                     with b1:
                         if bool(setor["ativo"]):
-                            if st.button("Inativar", key=f"inativar_setor_{setor_id}", use_container_width=True):
-                                conn.execute("UPDATE setores SET ativo = FALSE WHERE id = %s AND empresa_id = %s", (setor_id, empresa_id)); st.rerun()
+                            if st.button(
+                                "Inativar",
+                                key=f"inativar_setor_{setor_id}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE setores SET ativo = FALSE WHERE id = %s AND empresa_id = %s",
+                                    (setor_id, empresa_id),
+                                )
+                                st.rerun()
                         else:
-                            if st.button("Ativar", key=f"ativar_setor_{setor_id}", use_container_width=True):
-                                conn.execute("UPDATE setores SET ativo = TRUE WHERE id = %s AND empresa_id = %s", (setor_id, empresa_id)); st.rerun()
+                            if st.button(
+                                "Ativar",
+                                key=f"ativar_setor_{setor_id}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE setores SET ativo = TRUE WHERE id = %s AND empresa_id = %s",
+                                    (setor_id, empresa_id),
+                                )
+                                st.rerun()
                     with b2:
-                        if st.button("Excluir", key=f"excluir_setor_{setor_id}", use_container_width=True):
-                            possui = conn.execute("SELECT 1 FROM colaboradores WHERE setor_id = %s AND empresa_id = %s LIMIT 1", (setor_id, empresa_id)).fetchone()
-                            if possui: st.warning("Este setor possui colaboradores vinculados. Inative ao invés de excluir.")
-                            else: conn.execute("DELETE FROM setores WHERE id = %s AND empresa_id = %s", (setor_id, empresa_id)); st.success("Setor excluído."); st.rerun()
+                        if st.button(
+                            "Excluir",
+                            key=f"excluir_setor_{setor_id}",
+                            use_container_width=True,
+                        ):
+                            possui = conn.execute(
+                                "SELECT 1 FROM colaboradores WHERE setor_id = %s AND empresa_id = %s LIMIT 1",
+                                (setor_id, empresa_id),
+                            ).fetchone()
+                            if possui:
+                                st.warning(
+                                    "Este setor possui colaboradores vinculados. Inative ao invés de excluir."
+                                )
+                            else:
+                                conn.execute(
+                                    "DELETE FROM setores WHERE id = %s AND empresa_id = %s",
+                                    (setor_id, empresa_id),
+                                )
+                                st.success("Setor excluído.")
+                                st.rerun()
                     with b3:
-                        if st.button("Alterar", key=f"alterar_setor_{setor_id}", use_container_width=True):
-                            st.session_state.setor_editando_id = setor_id; st.rerun()
+                        if st.button(
+                            "Alterar",
+                            key=f"alterar_setor_{setor_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.setor_editando_id = setor_id
+                            st.rerun()
                 if st.session_state.setor_editando_id == setor_id:
-                    novo_nome_setor = st.text_input("Nome do Setor", value=setor["nome"] or "", key=f"edit_setor_nome_{setor_id}")
+                    novo_nome_setor = st.text_input(
+                        "Nome do Setor",
+                        value=setor["nome"] or "",
+                        key=f"edit_setor_nome_{setor_id}",
+                    )
                     a1, a2 = st.columns(2)
                     with a1:
-                        if st.button("Salvar alteração", key=f"salvar_setor_{setor_id}", use_container_width=True):
-                            if not novo_nome_setor.strip(): st.error("Informe o nome do setor.")
+                        if st.button(
+                            "Salvar alteração",
+                            key=f"salvar_setor_{setor_id}",
+                            use_container_width=True,
+                        ):
+                            if not novo_nome_setor.strip():
+                                st.error("Informe o nome do setor.")
                             else:
-                                conn.execute("UPDATE setores SET nome = %s WHERE id = %s AND empresa_id = %s", (novo_nome_setor.strip(), setor_id, empresa_id))
-                                st.session_state.setor_editando_id = None; st.success("Setor atualizado com sucesso."); st.rerun()
+                                conn.execute(
+                                    "UPDATE setores SET nome = %s WHERE id = %s AND empresa_id = %s",
+                                    (novo_nome_setor.strip(), setor_id, empresa_id),
+                                )
+                                st.session_state.setor_editando_id = None
+                                st.success("Setor atualizado com sucesso.")
+                                st.rerun()
                     with a2:
-                        if st.button("Cancelar alteração", key=f"cancelar_setor_{setor_id}", use_container_width=True):
-                            st.session_state.setor_editando_id = None; st.rerun()
+                        if st.button(
+                            "Cancelar alteração",
+                            key=f"cancelar_setor_{setor_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.setor_editando_id = None
+                            st.rerun()
     else:
         st.info("Nenhum setor cadastrado ainda.")
 
@@ -3292,50 +4074,118 @@ elif menu == "Cadastro de Cargos" and perfil_atual in ("admin", "gestor"):
             if not nome_cargo.strip():
                 st.error("Informe o nome do cargo.")
             else:
-                conn.execute("INSERT INTO cargos (empresa_id, nome, ativo) VALUES (%s, %s, %s)", (empresa_id, nome_cargo.strip(), ativo_cargo))
-                st.success("Cargo cadastrado com sucesso."); st.rerun()
+                conn.execute(
+                    "INSERT INTO cargos (empresa_id, nome, ativo) VALUES (%s, %s, %s)",
+                    (empresa_id, nome_cargo.strip(), ativo_cargo),
+                )
+                st.success("Cargo cadastrado com sucesso.")
+                st.rerun()
 
     st.markdown("---")
     st.subheader("Cargos cadastrados")
-    if "cargo_editando_id" not in st.session_state: st.session_state.cargo_editando_id = None
-    cargos_lista = conn.execute("SELECT id, nome, ativo FROM cargos WHERE empresa_id = %s ORDER BY id", (empresa_id,)).fetchall()
+    if "cargo_editando_id" not in st.session_state:
+        st.session_state.cargo_editando_id = None
+    cargos_lista = conn.execute(
+        "SELECT id, nome, ativo FROM cargos WHERE empresa_id = %s ORDER BY id",
+        (empresa_id,),
+    ).fetchall()
     if cargos_lista:
-        cargos_lista, _, _ = paginar_registros(cargos_lista, "pagina_cargos_cadastro", page_size=10)
+        cargos_lista, _, _ = paginar_registros(
+            cargos_lista, "pagina_cargos_cadastro", page_size=10
+        )
         for cargo in cargos_lista:
             cargo_id = cargo["id"]
             with st.container(border=True):
                 c1, c2, c3 = st.columns([3, 1.5, 3])
-                with c1: st.write(f"**ID {cargo['id']} - {cargo['nome']}**")
-                with c2: st.write("Ativo" if bool(cargo["ativo"]) else "Inativo")
+                with c1:
+                    st.write(f"**ID {cargo['id']} - {cargo['nome']}**")
+                with c2:
+                    st.write("Ativo" if bool(cargo["ativo"]) else "Inativo")
                 with c3:
                     b1, b2, b3 = st.columns(3)
                     with b1:
                         if bool(cargo["ativo"]):
-                            if st.button("Inativar", key=f"inativar_cargo_{cargo_id}", use_container_width=True):
-                                conn.execute("UPDATE cargos SET ativo = FALSE WHERE id = %s AND empresa_id = %s", (cargo_id, empresa_id)); st.rerun()
+                            if st.button(
+                                "Inativar",
+                                key=f"inativar_cargo_{cargo_id}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE cargos SET ativo = FALSE WHERE id = %s AND empresa_id = %s",
+                                    (cargo_id, empresa_id),
+                                )
+                                st.rerun()
                         else:
-                            if st.button("Ativar", key=f"ativar_cargo_{cargo_id}", use_container_width=True):
-                                conn.execute("UPDATE cargos SET ativo = TRUE WHERE id = %s AND empresa_id = %s", (cargo_id, empresa_id)); st.rerun()
+                            if st.button(
+                                "Ativar",
+                                key=f"ativar_cargo_{cargo_id}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE cargos SET ativo = TRUE WHERE id = %s AND empresa_id = %s",
+                                    (cargo_id, empresa_id),
+                                )
+                                st.rerun()
                     with b2:
-                        if st.button("Excluir", key=f"excluir_cargo_{cargo_id}", use_container_width=True):
-                            possui = conn.execute("SELECT 1 FROM colaboradores WHERE cargo_id = %s AND empresa_id = %s LIMIT 1", (cargo_id, empresa_id)).fetchone()
-                            if possui: st.warning("Este cargo possui colaboradores vinculados. Inative ao invés de excluir.")
-                            else: conn.execute("DELETE FROM cargos WHERE id = %s AND empresa_id = %s", (cargo_id, empresa_id)); st.success("Cargo excluído."); st.rerun()
+                        if st.button(
+                            "Excluir",
+                            key=f"excluir_cargo_{cargo_id}",
+                            use_container_width=True,
+                        ):
+                            possui = conn.execute(
+                                "SELECT 1 FROM colaboradores WHERE cargo_id = %s AND empresa_id = %s LIMIT 1",
+                                (cargo_id, empresa_id),
+                            ).fetchone()
+                            if possui:
+                                st.warning(
+                                    "Este cargo possui colaboradores vinculados. Inative ao invés de excluir."
+                                )
+                            else:
+                                conn.execute(
+                                    "DELETE FROM cargos WHERE id = %s AND empresa_id = %s",
+                                    (cargo_id, empresa_id),
+                                )
+                                st.success("Cargo excluído.")
+                                st.rerun()
                     with b3:
-                        if st.button("Alterar", key=f"alterar_cargo_{cargo_id}", use_container_width=True):
-                            st.session_state.cargo_editando_id = cargo_id; st.rerun()
+                        if st.button(
+                            "Alterar",
+                            key=f"alterar_cargo_{cargo_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.cargo_editando_id = cargo_id
+                            st.rerun()
                 if st.session_state.cargo_editando_id == cargo_id:
-                    novo_nome_cargo = st.text_input("Nome do Cargo", value=cargo["nome"] or "", key=f"edit_cargo_nome_{cargo_id}")
+                    novo_nome_cargo = st.text_input(
+                        "Nome do Cargo",
+                        value=cargo["nome"] or "",
+                        key=f"edit_cargo_nome_{cargo_id}",
+                    )
                     a1, a2 = st.columns(2)
                     with a1:
-                        if st.button("Salvar alteração", key=f"salvar_cargo_{cargo_id}", use_container_width=True):
-                            if not novo_nome_cargo.strip(): st.error("Informe o nome do cargo.")
+                        if st.button(
+                            "Salvar alteração",
+                            key=f"salvar_cargo_{cargo_id}",
+                            use_container_width=True,
+                        ):
+                            if not novo_nome_cargo.strip():
+                                st.error("Informe o nome do cargo.")
                             else:
-                                conn.execute("UPDATE cargos SET nome = %s WHERE id = %s AND empresa_id = %s", (novo_nome_cargo.strip(), cargo_id, empresa_id))
-                                st.session_state.cargo_editando_id = None; st.success("Cargo atualizado com sucesso."); st.rerun()
+                                conn.execute(
+                                    "UPDATE cargos SET nome = %s WHERE id = %s AND empresa_id = %s",
+                                    (novo_nome_cargo.strip(), cargo_id, empresa_id),
+                                )
+                                st.session_state.cargo_editando_id = None
+                                st.success("Cargo atualizado com sucesso.")
+                                st.rerun()
                     with a2:
-                        if st.button("Cancelar alteração", key=f"cancelar_cargo_{cargo_id}", use_container_width=True):
-                            st.session_state.cargo_editando_id = None; st.rerun()
+                        if st.button(
+                            "Cancelar alteração",
+                            key=f"cancelar_cargo_{cargo_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.cargo_editando_id = None
+                            st.rerun()
     else:
         st.info("Nenhum cargo cadastrado ainda.")
 
@@ -3376,19 +4226,38 @@ elif menu == "Quadro de Funcionários" and perfil_atual in ("admin", "gestor"):
             filtro_status = st.selectbox("Status", status_filtro)
 
         df_filtrado = df.copy()
-        if filtro_filial != "Todos": df_filtrado = df_filtrado[df_filtrado["filial"] == filtro_filial]
-        if filtro_setor != "Todos": df_filtrado = df_filtrado[df_filtrado["setor"] == filtro_setor]
-        if filtro_status != "Todos": df_filtrado = df_filtrado[df_filtrado["status"] == filtro_status]
+        if filtro_filial != "Todos":
+            df_filtrado = df_filtrado[df_filtrado["filial"] == filtro_filial]
+        if filtro_setor != "Todos":
+            df_filtrado = df_filtrado[df_filtrado["setor"] == filtro_setor]
+        if filtro_status != "Todos":
+            df_filtrado = df_filtrado[df_filtrado["status"] == filtro_status]
 
         st.markdown("---")
         colA, colB, colC = st.columns(3)
         colA.metric("Total", len(df_filtrado))
         colB.metric("Ativos", len(df_filtrado[df_filtrado["ativo"] == True]))
-        colC.metric("Desligados", len(df_filtrado[df_filtrado["status"] == "Desligado"]))
+        colC.metric(
+            "Desligados", len(df_filtrado[df_filtrado["status"] == "Desligado"])
+        )
 
         st.markdown("---")
         st.subheader("Lista de Colaboradores")
-        st.dataframe(df_filtrado[["nome", "matricula", "filial", "setor", "cargo", "status", "ativo", "data_admissao"]], use_container_width=True)
+        st.dataframe(
+            df_filtrado[
+                [
+                    "nome",
+                    "matricula",
+                    "filial",
+                    "setor",
+                    "cargo",
+                    "status",
+                    "ativo",
+                    "data_admissao",
+                ]
+            ],
+            use_container_width=True,
+        )
 
 elif menu == "Cadastro de Atendentes" and perfil_atual == "admin":
     st.header("Cadastro de Atendentes")
