@@ -2095,190 +2095,6 @@ if not st.session_state.logado:
                         st.error("Usuário ou senha inválidos.")
     st.stop()
 
-if menu == "Usuários da Empresa" and perfil_atual == "admin":
-    exigir_perfil("admin")
-    st.header("Usuários da Empresa")
-
-    empresa_id = get_empresa_id()
-
-    with st.expander("Novo usuário", expanded=True):
-        c1, c2 = st.columns(2)
-
-        with c1:
-            nome_usuario_novo = st.text_input("Nome completo", key="novo_usuario_nome")
-            email_usuario_novo = st.text_input("E-mail", key="novo_usuario_email")
-            usuario_usuario_novo = st.text_input("Usuário", key="novo_usuario_login")
-
-        with c2:
-            perfil_usuario_novo = st.selectbox(
-                "Perfil",
-                ["admin", "gestor", "usuario"],
-                key="novo_usuario_perfil",
-            )
-            senha_usuario_novo = st.text_input(
-                "Senha inicial",
-                type="password",
-                key="novo_usuario_senha",
-            )
-
-        if st.button("Cadastrar usuário", key="btn_cadastrar_usuario_empresa"):
-            if not nome_usuario_novo.strip():
-                st.error("Informe o nome do usuário.")
-            elif not email_usuario_novo.strip():
-                st.error("Informe o e-mail do usuário.")
-            elif not usuario_usuario_novo.strip():
-                st.error("Informe o login do usuário.")
-            elif not senha_usuario_novo.strip() or len(senha_usuario_novo.strip()) < 6:
-                st.error("A senha inicial deve ter pelo menos 6 caracteres.")
-            else:
-                try:
-                    criar_usuario_empresa(
-                        empresa_id=empresa_id,
-                        nome=nome_usuario_novo,
-                        email=email_usuario_novo,
-                        usuario=usuario_usuario_novo,
-                        senha=senha_usuario_novo,
-                        perfil=perfil_usuario_novo,
-                    )
-                    st.success("Usuário cadastrado com sucesso.")
-                    st.rerun()
-                except ValueError as exc:
-                    st.error(str(exc))
-                except Exception as exc:
-                    st.error(f"Erro ao cadastrar usuário: {exc}")
-
-    st.markdown("---")
-    st.subheader("Usuários cadastrados")
-
-    if "usuario_empresa_editando_id" not in st.session_state:
-        st.session_state.usuario_empresa_editando_id = None
-
-    usuarios_empresa = obter_usuarios_empresa(empresa_id)
-
-    if not usuarios_empresa:
-        st.info("Nenhum usuário cadastrado para esta empresa.")
-    else:
-        usuarios_empresa, _, _ = paginar_registros(
-            usuarios_empresa,
-            "pagina_usuarios_empresa",
-            page_size=10,
-        )
-
-        for usuario_row in usuarios_empresa:
-            usuario_id = usuario_row["id"]
-
-            with st.container(border=True):
-                col1, col2, col3 = st.columns([2.5, 2.2, 2.3])
-
-                with col1:
-                    st.write(f"**{usuario_row['nome']}**")
-                    st.caption(usuario_row["usuario"])
-
-                with col2:
-                    st.write(usuario_row["email"] or "Sem e-mail")
-                    st.caption(f"Perfil: {usuario_row['perfil']}")
-
-                with col3:
-                    b1, b2 = st.columns(2)
-
-                    with b1:
-                        status_label = (
-                            "Ativo" if bool(usuario_row["ativo"]) else "Inativo"
-                        )
-                        st.write(status_label)
-
-                    with b2:
-                        if st.button(
-                            "Alterar",
-                            key=f"alterar_usuario_empresa_{usuario_id}",
-                            use_container_width=True,
-                        ):
-                            st.session_state.usuario_empresa_editando_id = usuario_id
-                            st.rerun()
-
-                if st.session_state.usuario_empresa_editando_id == usuario_id:
-                    ed1, ed2 = st.columns(2)
-
-                    with ed1:
-                        edit_nome = st.text_input(
-                            "Nome",
-                            value=usuario_row["nome"] or "",
-                            key=f"edit_usuario_empresa_nome_{usuario_id}",
-                        )
-                        edit_email = st.text_input(
-                            "E-mail",
-                            value=usuario_row["email"] or "",
-                            key=f"edit_usuario_empresa_email_{usuario_id}",
-                        )
-                        edit_usuario = st.text_input(
-                            "Usuário",
-                            value=usuario_row["usuario"] or "",
-                            key=f"edit_usuario_empresa_login_{usuario_id}",
-                        )
-
-                    with ed2:
-                        perfis = ["admin", "gestor", "usuario"]
-                        idx_perfil = (
-                            perfis.index(usuario_row["perfil"])
-                            if usuario_row["perfil"] in perfis
-                            else 2
-                        )
-
-                        edit_perfil = st.selectbox(
-                            "Perfil",
-                            perfis,
-                            index=idx_perfil,
-                            key=f"edit_usuario_empresa_perfil_{usuario_id}",
-                        )
-
-                        edit_ativo = st.checkbox(
-                            "Ativo",
-                            value=bool(usuario_row["ativo"]),
-                            key=f"edit_usuario_empresa_ativo_{usuario_id}",
-                        )
-
-                        edit_senha = st.text_input(
-                            "Nova senha (opcional)",
-                            type="password",
-                            key=f"edit_usuario_empresa_senha_{usuario_id}",
-                        )
-
-                    a1, a2 = st.columns(2)
-
-                    with a1:
-                        if st.button(
-                            "Salvar alteração",
-                            key=f"salvar_usuario_empresa_{usuario_id}",
-                            use_container_width=True,
-                        ):
-                            try:
-                                atualizar_usuario_empresa(
-                                    usuario_id=usuario_id,
-                                    empresa_id=empresa_id,
-                                    nome=edit_nome,
-                                    email=edit_email,
-                                    usuario=edit_usuario,
-                                    perfil=edit_perfil,
-                                    ativo=edit_ativo,
-                                    nova_senha=edit_senha,
-                                )
-                                st.session_state.usuario_empresa_editando_id = None
-                                st.success("Usuário atualizado com sucesso.")
-                                st.rerun()
-                            except ValueError as exc:
-                                st.error(str(exc))
-                            except Exception as exc:
-                                st.error(f"Erro ao atualizar usuário: {exc}")
-
-                    with a2:
-                        if st.button(
-                            "Cancelar alteração",
-                            key=f"cancelar_usuario_empresa_{usuario_id}",
-                            use_container_width=True,
-                        ):
-                            st.session_state.usuario_empresa_editando_id = None
-                            st.rerun()
-
 
 def validar_limite_usuarios_empresa(empresa_id):
     empresa = conn.execute(
@@ -2572,6 +2388,193 @@ if st.session_state.get("menu_atual") not in menu_options:
 menu = st.session_state.menu_atual
 atualizar_menu_sessao(st.session_state.get("token_sessao"), menu)
 persistir_query_params()
+
+
+if menu == "Usuários da Empresa" and perfil_atual == "admin":
+    exigir_perfil("admin")
+    st.header("Usuários da Empresa")
+
+    empresa_id = get_empresa_id()
+
+    with st.expander("Novo usuário", expanded=True):
+        c1, c2 = st.columns(2)
+
+        with c1:
+            nome_usuario_novo = st.text_input("Nome completo", key="novo_usuario_nome")
+            email_usuario_novo = st.text_input("E-mail", key="novo_usuario_email")
+            usuario_usuario_novo = st.text_input("Usuário", key="novo_usuario_login")
+
+        with c2:
+            perfil_usuario_novo = st.selectbox(
+                "Perfil",
+                ["admin", "gestor", "usuario"],
+                key="novo_usuario_perfil",
+            )
+            senha_usuario_novo = st.text_input(
+                "Senha inicial",
+                type="password",
+                key="novo_usuario_senha",
+            )
+
+        if st.button("Cadastrar usuário", key="btn_cadastrar_usuario_empresa"):
+            if not nome_usuario_novo.strip():
+                st.error("Informe o nome do usuário.")
+            elif not email_usuario_novo.strip():
+                st.error("Informe o e-mail do usuário.")
+            elif not usuario_usuario_novo.strip():
+                st.error("Informe o login do usuário.")
+            elif not senha_usuario_novo.strip() or len(senha_usuario_novo.strip()) < 6:
+                st.error("A senha inicial deve ter pelo menos 6 caracteres.")
+            else:
+                try:
+                    criar_usuario_empresa(
+                        empresa_id=empresa_id,
+                        nome=nome_usuario_novo,
+                        email=email_usuario_novo,
+                        usuario=usuario_usuario_novo,
+                        senha=senha_usuario_novo,
+                        perfil=perfil_usuario_novo,
+                    )
+                    st.success("Usuário cadastrado com sucesso.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+                except Exception as exc:
+                    st.error(f"Erro ao cadastrar usuário: {exc}")
+
+    st.markdown("---")
+    st.subheader("Usuários cadastrados")
+
+    if "usuario_empresa_editando_id" not in st.session_state:
+        st.session_state.usuario_empresa_editando_id = None
+
+    usuarios_empresa = obter_usuarios_empresa(empresa_id)
+
+    if not usuarios_empresa:
+        st.info("Nenhum usuário cadastrado para esta empresa.")
+    else:
+        usuarios_empresa, _, _ = paginar_registros(
+            usuarios_empresa,
+            "pagina_usuarios_empresa",
+            page_size=10,
+        )
+
+        for usuario_row in usuarios_empresa:
+            usuario_id = usuario_row["id"]
+
+            with st.container(border=True):
+                col1, col2, col3 = st.columns([2.5, 2.2, 2.3])
+
+                with col1:
+                    st.write(f"**{usuario_row['nome']}**")
+                    st.caption(usuario_row["usuario"])
+
+                with col2:
+                    st.write(usuario_row["email"] or "Sem e-mail")
+                    st.caption(f"Perfil: {usuario_row['perfil']}")
+
+                with col3:
+                    b1, b2 = st.columns(2)
+
+                    with b1:
+                        status_label = (
+                            "Ativo" if bool(usuario_row["ativo"]) else "Inativo"
+                        )
+                        st.write(status_label)
+
+                    with b2:
+                        if st.button(
+                            "Alterar",
+                            key=f"alterar_usuario_empresa_{usuario_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.usuario_empresa_editando_id = usuario_id
+                            st.rerun()
+
+                if st.session_state.usuario_empresa_editando_id == usuario_id:
+                    ed1, ed2 = st.columns(2)
+
+                    with ed1:
+                        edit_nome = st.text_input(
+                            "Nome",
+                            value=usuario_row["nome"] or "",
+                            key=f"edit_usuario_empresa_nome_{usuario_id}",
+                        )
+                        edit_email = st.text_input(
+                            "E-mail",
+                            value=usuario_row["email"] or "",
+                            key=f"edit_usuario_empresa_email_{usuario_id}",
+                        )
+                        edit_usuario = st.text_input(
+                            "Usuário",
+                            value=usuario_row["usuario"] or "",
+                            key=f"edit_usuario_empresa_login_{usuario_id}",
+                        )
+
+                    with ed2:
+                        perfis = ["admin", "gestor", "usuario"]
+                        idx_perfil = (
+                            perfis.index(usuario_row["perfil"])
+                            if usuario_row["perfil"] in perfis
+                            else 2
+                        )
+
+                        edit_perfil = st.selectbox(
+                            "Perfil",
+                            perfis,
+                            index=idx_perfil,
+                            key=f"edit_usuario_empresa_perfil_{usuario_id}",
+                        )
+
+                        edit_ativo = st.checkbox(
+                            "Ativo",
+                            value=bool(usuario_row["ativo"]),
+                            key=f"edit_usuario_empresa_ativo_{usuario_id}",
+                        )
+
+                        edit_senha = st.text_input(
+                            "Nova senha (opcional)",
+                            type="password",
+                            key=f"edit_usuario_empresa_senha_{usuario_id}",
+                        )
+
+                    a1, a2 = st.columns(2)
+
+                    with a1:
+                        if st.button(
+                            "Salvar alteração",
+                            key=f"salvar_usuario_empresa_{usuario_id}",
+                            use_container_width=True,
+                        ):
+                            try:
+                                atualizar_usuario_empresa(
+                                    usuario_id=usuario_id,
+                                    empresa_id=empresa_id,
+                                    nome=edit_nome,
+                                    email=edit_email,
+                                    usuario=edit_usuario,
+                                    perfil=edit_perfil,
+                                    ativo=edit_ativo,
+                                    nova_senha=edit_senha,
+                                )
+                                st.session_state.usuario_empresa_editando_id = None
+                                st.success("Usuário atualizado com sucesso.")
+                                st.rerun()
+                            except ValueError as exc:
+                                st.error(str(exc))
+                            except Exception as exc:
+                                st.error(f"Erro ao atualizar usuário: {exc}")
+
+                    with a2:
+                        if st.button(
+                            "Cancelar alteração",
+                            key=f"cancelar_usuario_empresa_{usuario_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.usuario_empresa_editando_id = None
+                            st.rerun()
+
+
 
 with st.sidebar:
     render_sidebar_menu(menu_options=menu_options, current_menu=menu, logo_b64=logo_b64)
