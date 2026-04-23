@@ -144,6 +144,74 @@ def criar_usuario_empresa(empresa_id, nome, email, usuario, senha, perfil):
     )
 
 
+def criar_empresa_onboarding(nome_empresa, cnpj=None, plano="starter"):
+    nome_empresa = (nome_empresa or "").strip()
+    cnpj_limpo = re.sub(r"\D", "", cnpj or "")
+
+    if not nome_empresa:
+        raise ValueError("Informe o nome da empresa.")
+
+    if cnpj_limpo:
+        empresa_existente = conn.execute(
+            """
+            SELECT id
+            FROM empresas
+            WHERE cnpj = %s
+            LIMIT 1
+            """,
+            (cnpj_limpo,),
+        ).fetchone()
+        if empresa_existente:
+            raise ValueError("Já existe uma empresa cadastrada com este CNPJ.")
+    else:
+        empresa_existente = conn.execute(
+            """
+            SELECT id
+            FROM empresas
+            WHERE LOWER(TRIM(fantasia)) = LOWER(TRIM(%s))
+            LIMIT 1
+            """,
+            (nome_empresa,),
+        ).fetchone()
+        if empresa_existente:
+            raise ValueError("Já existe uma empresa cadastrada com este nome.")
+
+    limites = {
+        "starter": {"usuarios": 10, "colaboradores": 100},
+        "pro": {"usuarios": 25, "colaboradores": 300},
+        "enterprise": {"usuarios": None, "colaboradores": None},
+    }
+    plano = (plano or "starter").lower()
+    if plano not in limites:
+        plano = "starter"
+
+    resultado = conn.execute(
+        """
+        INSERT INTO empresas (
+            razao_social,
+            fantasia,
+            cnpj,
+            ativo,
+            plano,
+            limite_colaboradores,
+            limite_usuarios
+        )
+        VALUES (%s, %s, %s, TRUE, %s, %s, %s)
+        RETURNING id
+        """,
+        (
+            nome_empresa,
+            nome_empresa,
+            cnpj_limpo or None,
+            plano,
+            limites[plano]["colaboradores"],
+            limites[plano]["usuarios"],
+        ),
+    ).fetchone()
+
+    return resultado["id"]
+
+
 def atualizar_usuario_empresa(
     usuario_id, empresa_id, nome, email, usuario, perfil, ativo, nova_senha=None
 ):
@@ -315,76 +383,6 @@ def exigir_perfil(*perfis):
     if perfil not in perfis:
         st.error("Você não possui permissão para acessar esta funcionalidade.")
         st.stop()
-
-
-def criar_empresa(nome, cnpj=None):
-    result = conn.execute(
-        """
-        INSERT INTO empresas (
-            razao_social,
-            fantasia,
-            cnpj,
-            ativo,
-            plano,
-            limite_colaboradores,
-            limite_usuarios
-        )
-        VALUES (%s, %s, %s, TRUE, 'Free', 10, 3)
-        RETURNING id
-        """,
-        (nome, nome, cnpj),
-    ).fetchone()
-
-    return result["id"]
-
-
-if "modo_cadastro" not in st.session_state:
-    st.session_state.modo_cadastro = False
-
-col1, col2 = st.columns(2)
-
-with col1:
-    if st.button("Entrar"):
-        st.session_state.modo_cadastro = False
-
-with col2:
-    if st.button("Criar conta"):
-        st.session_state.modo_cadastro = True
-
-if st.session_state.modo_cadastro:
-
-    st.title("Criar conta - Gestão RH")
-
-    nome_empresa = st.text_input("Nome da empresa")
-    cnpj = st.text_input("CNPJ (opcional)")
-
-    nome_admin = st.text_input("Seu nome")
-    email_admin = st.text_input("Seu e-mail")
-    usuario_admin = st.text_input("Usuário")
-    senha_admin = st.text_input("Senha", type="password")
-
-    if st.button("Criar minha conta"):
-        try:
-            empresa_id = criar_empresa(nome_empresa, cnpj)
-
-            criar_usuario_empresa(
-                empresa_id=empresa_id,
-                nome=nome_admin,
-                email=email_admin,
-                usuario=usuario_admin,
-                senha=senha_admin,
-                perfil="admin",
-            )
-
-            usuario = obter_usuario_por_login(usuario_admin)
-
-            registrar_sessao_usuario(usuario)
-
-            st.success("Conta criada com sucesso!")
-            st.rerun()
-
-        except Exception as e:
-            st.error(f"Erro ao criar conta: {e}")
 
 
 def obter_usuario_por_login(login):
@@ -1072,6 +1070,7 @@ def init_state():
         "mostrar_legenda": False,
         "limpar_campos_nova_solicitacao": False,
         "token_sessao": None,
+        "modo_acesso": "login",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1975,6 +1974,20 @@ if invite_token:
 if not st.session_state.logado:
     aplicar_estilo_login()
 
+    modo_acesso = st.session_state.get("modo_acesso", "login")
+
+    topo1, topo2, topo3 = st.columns([1.2, 1, 1.2])
+    with topo2:
+        bt1, bt2 = st.columns(2)
+        with bt1:
+            if st.button("Entrar", key="btn_modo_login", use_container_width=True):
+                st.session_state.modo_acesso = "login"
+                st.rerun()
+        with bt2:
+            if st.button("Criar conta", key="btn_modo_cadastro", use_container_width=True):
+                st.session_state.modo_acesso = "cadastro"
+                st.rerun()
+
     col1, col2, col3 = st.columns([1.2, 1, 1.2])
     with col2:
         if logo_b64:
@@ -1991,36 +2004,280 @@ if not st.session_state.logado:
             "<div style='text-align:center; color:white; font-size:26px; font-weight:700;'>GESTÃO RH</div>",
             unsafe_allow_html=True,
         )
-        st.markdown(
-            "<div style='text-align:center; color:#c7d7e6; font-size:15px; margin-top:5px;'>Acesse sua conta</div>",
-            unsafe_allow_html=True,
-        )
 
-        usuario_input = st.text_input(
-            "Usuário ou e-mail", placeholder="Digite seu usuário ou e-mail"
-        )
-        senha_input = st.text_input(
-            "Senha", type="password", placeholder="Digite sua senha"
-        )
+        if modo_acesso == "cadastro":
+            st.markdown(
+                "<div style='text-align:center; color:#c7d7e6; font-size:15px; margin-top:5px;'>Crie sua empresa e seu acesso administrador</div>",
+                unsafe_allow_html=True,
+            )
 
-        if st.button("ENTRAR →"):
-            usuario_digitado = usuario_input.strip()
-            senha_digitada = senha_input.strip()
+            nome_empresa = st.text_input("Nome da empresa", key="cad_empresa_nome")
+            cnpj_empresa = st.text_input("CNPJ (opcional)", key="cad_empresa_cnpj")
+            nome_admin = st.text_input("Seu nome", key="cad_admin_nome")
+            email_admin = st.text_input("Seu e-mail", key="cad_admin_email")
+            usuario_admin_cad = st.text_input("Usuário", key="cad_admin_usuario")
+            senha_admin_cad = st.text_input("Senha", type="password", key="cad_admin_senha")
+            confirmar_senha_admin_cad = st.text_input(
+                "Confirmar senha",
+                type="password",
+                key="cad_admin_senha_confirmar",
+            )
 
-            if not usuario_digitado or not senha_digitada:
-                st.error("Informe usuário e senha.")
-            else:
-                usuario = autenticar_usuario(usuario_digitado, senha_digitada)
-                if usuario:
-                    registrar_sessao_usuario(usuario)
-                    st.rerun()
-                elif autenticar_admin(usuario_digitado, senha_digitada):
-                    st.error(
-                        "O acesso master legado não está habilitado neste fluxo SaaS. Cadastre este usuário na tabela usuarios."
-                    )
+            if st.button("CRIAR MINHA CONTA", key="btn_criar_minha_conta", use_container_width=True):
+                if not nome_empresa.strip():
+                    st.error("Informe o nome da empresa.")
+                elif cnpj_empresa.strip() and not validar_cnpj(cnpj_empresa.strip()):
+                    st.error("CNPJ inválido.")
+                elif not nome_admin.strip():
+                    st.error("Informe seu nome.")
+                elif not email_admin.strip():
+                    st.error("Informe seu e-mail.")
+                elif not usuario_admin_cad.strip():
+                    st.error("Informe o usuário administrador.")
+                elif len(senha_admin_cad.strip()) < 6:
+                    st.error("A senha deve ter pelo menos 6 caracteres.")
+                elif senha_admin_cad != confirmar_senha_admin_cad:
+                    st.error("As senhas não conferem.")
                 else:
-                    st.error("Usuário ou senha inválidos.")
+                    try:
+                        empresa_id_nova = criar_empresa_onboarding(
+                            nome_empresa=nome_empresa,
+                            cnpj=cnpj_empresa,
+                            plano="starter",
+                        )
+                        criar_usuario_empresa(
+                            empresa_id=empresa_id_nova,
+                            nome=nome_admin,
+                            email=email_admin,
+                            usuario=usuario_admin_cad,
+                            senha=senha_admin_cad,
+                            perfil="admin",
+                        )
+                        usuario_criado = obter_usuario_por_login(usuario_admin_cad.strip())
+                        if not usuario_criado:
+                            raise ValueError("Conta criada, mas não foi possível localizar o usuário para login.")
+                        registrar_sessao_usuario(usuario_criado)
+                        st.success("Conta criada com sucesso.")
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        st.error(f"Erro ao criar conta: {exc}")
+        else:
+            st.markdown(
+                "<div style='text-align:center; color:#c7d7e6; font-size:15px; margin-top:5px;'>Acesse sua conta</div>",
+                unsafe_allow_html=True,
+            )
+
+            usuario_input = st.text_input(
+                "Usuário ou e-mail", placeholder="Digite seu usuário ou e-mail"
+            )
+            senha_input = st.text_input(
+                "Senha", type="password", placeholder="Digite sua senha"
+            )
+
+            if st.button("ENTRAR →", key="btn_login_submit", use_container_width=True):
+                usuario_digitado = usuario_input.strip()
+                senha_digitada = senha_input.strip()
+
+                if not usuario_digitado or not senha_digitada:
+                    st.error("Informe usuário e senha.")
+                else:
+                    usuario = autenticar_usuario(usuario_digitado, senha_digitada)
+                    if usuario:
+                        registrar_sessao_usuario(usuario)
+                        st.rerun()
+                    elif autenticar_admin(usuario_digitado, senha_digitada):
+                        st.error(
+                            "O acesso master legado não está habilitado neste fluxo SaaS. Cadastre este usuário na tabela usuarios."
+                        )
+                    else:
+                        st.error("Usuário ou senha inválidos.")
     st.stop()
+
+if menu == "Usuários da Empresa" and perfil_atual == "admin":
+    exigir_perfil("admin")
+    st.header("Usuários da Empresa")
+
+    empresa_id = get_empresa_id()
+
+    with st.expander("Novo usuário", expanded=True):
+        c1, c2 = st.columns(2)
+
+        with c1:
+            nome_usuario_novo = st.text_input("Nome completo", key="novo_usuario_nome")
+            email_usuario_novo = st.text_input("E-mail", key="novo_usuario_email")
+            usuario_usuario_novo = st.text_input("Usuário", key="novo_usuario_login")
+
+        with c2:
+            perfil_usuario_novo = st.selectbox(
+                "Perfil",
+                ["admin", "gestor", "usuario"],
+                key="novo_usuario_perfil",
+            )
+            senha_usuario_novo = st.text_input(
+                "Senha inicial",
+                type="password",
+                key="novo_usuario_senha",
+            )
+
+        if st.button("Cadastrar usuário", key="btn_cadastrar_usuario_empresa"):
+            if not nome_usuario_novo.strip():
+                st.error("Informe o nome do usuário.")
+            elif not email_usuario_novo.strip():
+                st.error("Informe o e-mail do usuário.")
+            elif not usuario_usuario_novo.strip():
+                st.error("Informe o login do usuário.")
+            elif not senha_usuario_novo.strip() or len(senha_usuario_novo.strip()) < 6:
+                st.error("A senha inicial deve ter pelo menos 6 caracteres.")
+            else:
+                try:
+                    criar_usuario_empresa(
+                        empresa_id=empresa_id,
+                        nome=nome_usuario_novo,
+                        email=email_usuario_novo,
+                        usuario=usuario_usuario_novo,
+                        senha=senha_usuario_novo,
+                        perfil=perfil_usuario_novo,
+                    )
+                    st.success("Usuário cadastrado com sucesso.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+                except Exception as exc:
+                    st.error(f"Erro ao cadastrar usuário: {exc}")
+
+    st.markdown("---")
+    st.subheader("Usuários cadastrados")
+
+    if "usuario_empresa_editando_id" not in st.session_state:
+        st.session_state.usuario_empresa_editando_id = None
+
+    usuarios_empresa = obter_usuarios_empresa(empresa_id)
+
+    if not usuarios_empresa:
+        st.info("Nenhum usuário cadastrado para esta empresa.")
+    else:
+        usuarios_empresa, _, _ = paginar_registros(
+            usuarios_empresa,
+            "pagina_usuarios_empresa",
+            page_size=10,
+        )
+
+        for usuario_row in usuarios_empresa:
+            usuario_id = usuario_row["id"]
+
+            with st.container(border=True):
+                col1, col2, col3 = st.columns([2.5, 2.2, 2.3])
+
+                with col1:
+                    st.write(f"**{usuario_row['nome']}**")
+                    st.caption(usuario_row["usuario"])
+
+                with col2:
+                    st.write(usuario_row["email"] or "Sem e-mail")
+                    st.caption(f"Perfil: {usuario_row['perfil']}")
+
+                with col3:
+                    b1, b2 = st.columns(2)
+
+                    with b1:
+                        status_label = (
+                            "Ativo" if bool(usuario_row["ativo"]) else "Inativo"
+                        )
+                        st.write(status_label)
+
+                    with b2:
+                        if st.button(
+                            "Alterar",
+                            key=f"alterar_usuario_empresa_{usuario_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.usuario_empresa_editando_id = usuario_id
+                            st.rerun()
+
+                if st.session_state.usuario_empresa_editando_id == usuario_id:
+                    ed1, ed2 = st.columns(2)
+
+                    with ed1:
+                        edit_nome = st.text_input(
+                            "Nome",
+                            value=usuario_row["nome"] or "",
+                            key=f"edit_usuario_empresa_nome_{usuario_id}",
+                        )
+                        edit_email = st.text_input(
+                            "E-mail",
+                            value=usuario_row["email"] or "",
+                            key=f"edit_usuario_empresa_email_{usuario_id}",
+                        )
+                        edit_usuario = st.text_input(
+                            "Usuário",
+                            value=usuario_row["usuario"] or "",
+                            key=f"edit_usuario_empresa_login_{usuario_id}",
+                        )
+
+                    with ed2:
+                        perfis = ["admin", "gestor", "usuario"]
+                        idx_perfil = (
+                            perfis.index(usuario_row["perfil"])
+                            if usuario_row["perfil"] in perfis
+                            else 2
+                        )
+
+                        edit_perfil = st.selectbox(
+                            "Perfil",
+                            perfis,
+                            index=idx_perfil,
+                            key=f"edit_usuario_empresa_perfil_{usuario_id}",
+                        )
+
+                        edit_ativo = st.checkbox(
+                            "Ativo",
+                            value=bool(usuario_row["ativo"]),
+                            key=f"edit_usuario_empresa_ativo_{usuario_id}",
+                        )
+
+                        edit_senha = st.text_input(
+                            "Nova senha (opcional)",
+                            type="password",
+                            key=f"edit_usuario_empresa_senha_{usuario_id}",
+                        )
+
+                    a1, a2 = st.columns(2)
+
+                    with a1:
+                        if st.button(
+                            "Salvar alteração",
+                            key=f"salvar_usuario_empresa_{usuario_id}",
+                            use_container_width=True,
+                        ):
+                            try:
+                                atualizar_usuario_empresa(
+                                    usuario_id=usuario_id,
+                                    empresa_id=empresa_id,
+                                    nome=edit_nome,
+                                    email=edit_email,
+                                    usuario=edit_usuario,
+                                    perfil=edit_perfil,
+                                    ativo=edit_ativo,
+                                    nova_senha=edit_senha,
+                                )
+                                st.session_state.usuario_empresa_editando_id = None
+                                st.success("Usuário atualizado com sucesso.")
+                                st.rerun()
+                            except ValueError as exc:
+                                st.error(str(exc))
+                            except Exception as exc:
+                                st.error(f"Erro ao atualizar usuário: {exc}")
+
+                    with a2:
+                        if st.button(
+                            "Cancelar alteração",
+                            key=f"cancelar_usuario_empresa_{usuario_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.usuario_empresa_editando_id = None
+                            st.rerun()
 
 
 def validar_limite_usuarios_empresa(empresa_id):
@@ -2044,6 +2301,36 @@ def validar_limite_usuarios_empresa(empresa_id):
     ).fetchone()
 
     limite = empresa["limite_usuarios"] if empresa else None
+    quantidade = total["total"] if total else 0
+
+    if limite is None:
+        return True
+
+    return quantidade < limite
+
+
+def validar_limite_colaboradores(empresa_id):
+    empresa = conn.execute(
+        """
+        SELECT limite_colaboradores
+        FROM empresas
+        WHERE id = %s
+        LIMIT 1
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    total = conn.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM colaboradores
+        WHERE empresa_id = %s
+          AND ativo = TRUE
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    limite = empresa["limite_colaboradores"] if empresa else None
     quantidade = total["total"] if total else 0
 
     if limite is None:
@@ -2328,191 +2615,6 @@ with st.sidebar:
             "Trocar usuário", key="trocar_usuario_menu", use_container_width=True
         ):
             logout()
-
-
-if menu == "Usuários da Empresa" and perfil_atual == "admin":
-    exigir_perfil("admin")
-    st.header("Usuários da Empresa")
-
-    empresa_id = get_empresa_id()
-
-    with st.expander("Novo usuário", expanded=True):
-        c1, c2 = st.columns(2)
-
-        with c1:
-            nome_usuario_novo = st.text_input("Nome completo", key="novo_usuario_nome")
-            email_usuario_novo = st.text_input("E-mail", key="novo_usuario_email")
-            usuario_usuario_novo = st.text_input("Usuário", key="novo_usuario_login")
-
-        with c2:
-            perfil_usuario_novo = st.selectbox(
-                "Perfil",
-                ["admin", "gestor", "usuario"],
-                key="novo_usuario_perfil",
-            )
-            senha_usuario_novo = st.text_input(
-                "Senha inicial",
-                type="password",
-                key="novo_usuario_senha",
-            )
-
-        if st.button("Cadastrar usuário", key="btn_cadastrar_usuario_empresa"):
-            if not nome_usuario_novo.strip():
-                st.error("Informe o nome do usuário.")
-            elif not email_usuario_novo.strip():
-                st.error("Informe o e-mail do usuário.")
-            elif not usuario_usuario_novo.strip():
-                st.error("Informe o login do usuário.")
-            elif not senha_usuario_novo.strip() or len(senha_usuario_novo.strip()) < 6:
-                st.error("A senha inicial deve ter pelo menos 6 caracteres.")
-            else:
-                try:
-                    criar_usuario_empresa(
-                        empresa_id=empresa_id,
-                        nome=nome_usuario_novo,
-                        email=email_usuario_novo,
-                        usuario=usuario_usuario_novo,
-                        senha=senha_usuario_novo,
-                        perfil=perfil_usuario_novo,
-                    )
-                    st.success("Usuário cadastrado com sucesso.")
-                    st.rerun()
-                except ValueError as exc:
-                    st.error(str(exc))
-                except Exception as exc:
-                    st.error(f"Erro ao cadastrar usuário: {exc}")
-
-    st.markdown("---")
-    st.subheader("Usuários cadastrados")
-
-    if "usuario_empresa_editando_id" not in st.session_state:
-        st.session_state.usuario_empresa_editando_id = None
-
-    usuarios_empresa = obter_usuarios_empresa(empresa_id)
-
-    if not usuarios_empresa:
-        st.info("Nenhum usuário cadastrado para esta empresa.")
-    else:
-        usuarios_empresa, _, _ = paginar_registros(
-            usuarios_empresa,
-            "pagina_usuarios_empresa",
-            page_size=10,
-        )
-
-        for usuario_row in usuarios_empresa:
-            usuario_id = usuario_row["id"]
-
-            with st.container(border=True):
-                col1, col2, col3 = st.columns([2.5, 2.2, 2.3])
-
-                with col1:
-                    st.write(f"**{usuario_row['nome']}**")
-                    st.caption(usuario_row["usuario"])
-
-                with col2:
-                    st.write(usuario_row["email"] or "Sem e-mail")
-                    st.caption(f"Perfil: {usuario_row['perfil']}")
-
-                with col3:
-                    b1, b2 = st.columns(2)
-
-                    with b1:
-                        status_label = (
-                            "Ativo" if bool(usuario_row["ativo"]) else "Inativo"
-                        )
-                        st.write(status_label)
-
-                    with b2:
-                        if st.button(
-                            "Alterar",
-                            key=f"alterar_usuario_empresa_{usuario_id}",
-                            use_container_width=True,
-                        ):
-                            st.session_state.usuario_empresa_editando_id = usuario_id
-                            st.rerun()
-
-                if st.session_state.usuario_empresa_editando_id == usuario_id:
-                    ed1, ed2 = st.columns(2)
-
-                    with ed1:
-                        edit_nome = st.text_input(
-                            "Nome",
-                            value=usuario_row["nome"] or "",
-                            key=f"edit_usuario_empresa_nome_{usuario_id}",
-                        )
-                        edit_email = st.text_input(
-                            "E-mail",
-                            value=usuario_row["email"] or "",
-                            key=f"edit_usuario_empresa_email_{usuario_id}",
-                        )
-                        edit_usuario = st.text_input(
-                            "Usuário",
-                            value=usuario_row["usuario"] or "",
-                            key=f"edit_usuario_empresa_login_{usuario_id}",
-                        )
-
-                    with ed2:
-                        perfis = ["admin", "gestor", "usuario"]
-                        idx_perfil = (
-                            perfis.index(usuario_row["perfil"])
-                            if usuario_row["perfil"] in perfis
-                            else 2
-                        )
-
-                        edit_perfil = st.selectbox(
-                            "Perfil",
-                            perfis,
-                            index=idx_perfil,
-                            key=f"edit_usuario_empresa_perfil_{usuario_id}",
-                        )
-
-                        edit_ativo = st.checkbox(
-                            "Ativo",
-                            value=bool(usuario_row["ativo"]),
-                            key=f"edit_usuario_empresa_ativo_{usuario_id}",
-                        )
-
-                        edit_senha = st.text_input(
-                            "Nova senha (opcional)",
-                            type="password",
-                            key=f"edit_usuario_empresa_senha_{usuario_id}",
-                        )
-
-                    a1, a2 = st.columns(2)
-
-                    with a1:
-                        if st.button(
-                            "Salvar alteração",
-                            key=f"salvar_usuario_empresa_{usuario_id}",
-                            use_container_width=True,
-                        ):
-                            try:
-                                atualizar_usuario_empresa(
-                                    usuario_id=usuario_id,
-                                    empresa_id=empresa_id,
-                                    nome=edit_nome,
-                                    email=edit_email,
-                                    usuario=edit_usuario,
-                                    perfil=edit_perfil,
-                                    ativo=edit_ativo,
-                                    nova_senha=edit_senha,
-                                )
-                                st.session_state.usuario_empresa_editando_id = None
-                                st.success("Usuário atualizado com sucesso.")
-                                st.rerun()
-                            except ValueError as exc:
-                                st.error(str(exc))
-                            except Exception as exc:
-                                st.error(f"Erro ao atualizar usuário: {exc}")
-
-                    with a2:
-                        if st.button(
-                            "Cancelar alteração",
-                            key=f"cancelar_usuario_empresa_{usuario_id}",
-                            use_container_width=True,
-                        ):
-                            st.session_state.usuario_empresa_editando_id = None
-                            st.rerun()
 
 
 if menu == "Nova Solicitação":
@@ -3146,15 +3248,9 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         (empresa_id,),
     ).fetchone()
 
-    plano_nome = (
-        empresa_info["plano"]
-        if empresa_info and empresa_info.get("plano")
-        else "não definido"
-    )
+    plano_nome = (empresa_info["plano"] if empresa_info and empresa_info.get("plano") else "não definido")
     limite_usuarios = empresa_info["limite_usuarios"] if empresa_info else None
-    limite_colaboradores = (
-        empresa_info["limite_colaboradores"] if empresa_info else None
-    )
+    limite_colaboradores = empresa_info["limite_colaboradores"] if empresa_info else None
     usados_usuarios = total_usuarios_empresa["total"] if total_usuarios_empresa else 0
     usados_colaboradores = (
         total_colaboradores_ativos_empresa["total"]
@@ -3172,6 +3268,7 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         "Colaboradores ativos",
         f"{usados_colaboradores} / {limite_colaboradores if limite_colaboradores is not None else 'Ilimitado'}",
     )
+
 
     dados = conn.execute(
         """
@@ -3233,15 +3330,9 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
     ).fetchone()
 
     estrutura1, estrutura2, estrutura3 = st.columns(3)
-    estrutura1.metric(
-        "Filiais", total_filiais_empresa["total"] if total_filiais_empresa else 0
-    )
-    estrutura2.metric(
-        "Setores", total_setores_empresa["total"] if total_setores_empresa else 0
-    )
-    estrutura3.metric(
-        "Cargos", total_cargos_empresa["total"] if total_cargos_empresa else 0
-    )
+    estrutura1.metric("Filiais", total_filiais_empresa["total"] if total_filiais_empresa else 0)
+    estrutura2.metric("Setores", total_setores_empresa["total"] if total_setores_empresa else 0)
+    estrutura3.metric("Cargos", total_cargos_empresa["total"] if total_cargos_empresa else 0)
 
     if df.empty:
         st.info(
@@ -3329,6 +3420,53 @@ Para começar:
             aniversariantes_mes["dia"] = aniversariantes_mes["data_nascimento"].dt.day
             aniversariantes_mes = aniversariantes_mes.sort_values(["dia", "nome"])
 
+        empresa_info = conn.execute(
+            """
+            SELECT plano, limite_colaboradores, limite_usuarios, fantasia
+            FROM empresas
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (empresa_id,),
+        ).fetchone()
+        total_usuarios_empresa = conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM usuarios
+            WHERE empresa_id = %s
+            """,
+            (empresa_id,),
+        ).fetchone()
+        total_filiais = conn.execute(
+            "SELECT COUNT(*) AS total FROM filiais WHERE empresa_id = %s",
+            (empresa_id,),
+        ).fetchone()
+        total_setores = conn.execute(
+            "SELECT COUNT(*) AS total FROM setores WHERE empresa_id = %s",
+            (empresa_id,),
+        ).fetchone()
+        total_cargos = conn.execute(
+            "SELECT COUNT(*) AS total FROM cargos WHERE empresa_id = %s",
+            (empresa_id,),
+        ).fetchone()
+
+        st.caption(
+            f"Empresa: {empresa_info['fantasia'] if empresa_info else st.session_state.get('empresa_nome','')} · Plano: {empresa_info['plano'] if empresa_info else st.session_state.get('plano','starter')}"
+        )
+
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Plano atual", (empresa_info["plano"].title() if empresa_info and empresa_info.get("plano") else "Starter"))
+        usuarios_total = total_usuarios_empresa["total"] if total_usuarios_empresa else 0
+        limite_usuarios = empresa_info["limite_usuarios"] if empresa_info else None
+        r2.metric("Usuários", f"{usuarios_total} / {limite_usuarios if limite_usuarios is not None else '∞'}")
+        limite_colaboradores = empresa_info["limite_colaboradores"] if empresa_info else None
+        r3.metric("Colaboradores ativos", f"{registros_ativos} / {limite_colaboradores if limite_colaboradores is not None else '∞'}")
+
+        e1, e2, e3 = st.columns(3)
+        e1.metric("Filiais", total_filiais["total"] if total_filiais else 0)
+        e2.metric("Setores", total_setores["total"] if total_setores else 0)
+        e3.metric("Cargos", total_cargos["total"] if total_cargos else 0)
+
         c1, c2, c3, c4, c5, c6 = st.columns(6)
         c1.metric("Total de colaboradores", total_colaboradores)
         c2.metric("Registros ativos", registros_ativos)
@@ -3336,6 +3474,18 @@ Para começar:
         c4.metric("Desligamentos no período", desligamentos_periodo)
         c5.metric("Turnover", f"{turnover:.2f}%")
         c6.metric("Afastados", afastados_total)
+
+        if total_colaboradores == 0:
+            st.info(
+                """🚀 Bem-vindo ao Gestão RH
+
+Para começar:
+
+1. Cadastre uma filial
+2. Cadastre um setor
+3. Cadastre um cargo
+4. Cadastre seu primeiro colaborador"""
+            )
 
         st.markdown("---")
 
