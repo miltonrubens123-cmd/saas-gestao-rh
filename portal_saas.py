@@ -1383,6 +1383,14 @@ def render_anexos_como_arquivo(solicitacao_id, prefixo="anexo"):
             )
 
 
+def calcular_data_vencimento_documento(data_emissao, periodicidade_meses):
+    if not data_emissao or not periodicidade_meses:
+        return None
+    return (
+        pd.Timestamp(data_emissao) + pd.DateOffset(months=int(periodicidade_meses))
+    ).date()
+
+
 def obter_solicitacoes_filtradas(
     cliente_id=None,
     cliente_usuario=None,
@@ -2054,6 +2062,44 @@ def aplicar_estilo_login():
         """,
         unsafe_allow_html=True,
     )
+
+
+@st.cache_data(ttl=60)
+def listar_tipos_documento_sst():
+    return conn.execute(
+        """
+        SELECT id, codigo, nome, escopo, periodicidade_meses, exige_revisao_por_evento
+        FROM tipos_documento_sst
+        WHERE ativo = TRUE
+        ORDER BY nome
+    """
+    ).fetchall()
+
+
+@st.cache_data(ttl=60)
+def listar_filiais_ativas(empresa_id):
+    return conn.execute(
+        """
+        SELECT id, nome
+        FROM filiais
+        WHERE empresa_id = %s AND ativo = TRUE
+        ORDER BY nome
+    """,
+        (empresa_id,),
+    ).fetchall()
+
+
+@st.cache_data(ttl=60)
+def listar_colaboradores_ativos(empresa_id):
+    return conn.execute(
+        """
+        SELECT id, nome, matricula
+        FROM colaboradores
+        WHERE empresa_id = %s
+        ORDER BY nome
+    """,
+        (empresa_id,),
+    ).fetchall()
 
 
 def render_tela_convite(token_convite):
@@ -4625,31 +4671,15 @@ elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
     exigir_perfil("admin", "gestor")
     st.header("Documentos SST")
     empresa_id = get_empresa_id()
-    atualizar_status_documentos_sst_empresa(empresa_id)
+    # atualizar_status_documentos_sst_empresa(empresa_id)
 
-    tipos_documento = conn.execute(
-        """
-        SELECT id, codigo, nome, escopo, periodicidade_meses, exige_revisao_por_evento
-        FROM tipos_documento_sst
-        WHERE ativo = TRUE
-        ORDER BY nome
-        """
-    ).fetchall()
-    mapa_tipos = {row["nome"]: row for row in tipos_documento}
+    tipos_documento = listar_tipos_documento_sst()
+    mapa_tipos = (
+        {row["nome"]: dict(row) for row in tipos_documento} if tipos_documento else {}
+    )
 
-    filiais = conn.execute(
-        "SELECT id, nome FROM filiais WHERE empresa_id = %s AND ativo = TRUE ORDER BY nome",
-        (empresa_id,),
-    ).fetchall()
-    colaboradores = conn.execute(
-        """
-        SELECT id, nome, matricula
-        FROM colaboradores
-        WHERE empresa_id = %s
-        ORDER BY nome
-        """,
-        (empresa_id,),
-    ).fetchall()
+    filiais = listar_filiais_ativas(empresa_id)
+    colaboradores = listar_colaboradores_ativos(empresa_id)
 
     with st.expander("Novo documento", expanded=True):
         c1, c2, c3 = st.columns(3)
@@ -4675,6 +4705,23 @@ elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
         data_vencimento_calculada = calcular_data_vencimento_documento(
             data_emissao,
             periodicidade,
+        )
+        colaborador_id_sel = None
+
+if escopo_tipo == "colaborador":
+    colaborador_labels = ["Selecione"] + [
+        f"{row['nome']} ({row['matricula']})" for row in colaboradores
+    ]
+
+    colaborador_nome_sel = st.selectbox(
+        "Colaborador", colaborador_labels, key="sst_colaborador"
+    )
+
+    if colaborador_nome_sel != "Selecione":
+        matricula = colaborador_nome_sel.split("(")[-1].replace(")", "")
+
+        colaborador_id_sel = next(
+            row["id"] for row in colaboradores if row["matricula"] == matricula
         )
 
         with c2:
@@ -4815,6 +4862,11 @@ elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
                         agora(),
                     ),
                 )
+                # ✅ LIMPA CACHE AQUI
+                listar_tipos_documento_sst.clear()
+                listar_filiais_ativas.clear()
+                listar_colaboradores_ativos.clear()
+
                 st.success("Documento SST cadastrado com sucesso.")
                 st.rerun()
 
