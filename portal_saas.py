@@ -1569,6 +1569,10 @@ def aplicar_estilo_login():
             padding-bottom: 1.5rem !important;
         }
 
+        .block-container > div {
+            width: 100%;
+        }
+        
         .login-brand {
             min-height: 720px;
             border-radius: 32px;
