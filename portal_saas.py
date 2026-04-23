@@ -1549,7 +1549,10 @@ def aplicar_estilo_login():
         }
 
         .stApp {
-            background: linear-gradient(135deg, #04182D 0%, #0B3A63 100%);
+            background:
+                radial-gradient(circle at top left, rgba(58, 28, 113, 0.18), transparent 28%),
+                radial-gradient(circle at bottom right, rgba(46, 125, 255, 0.10), transparent 24%),
+                linear-gradient(135deg, #031427 0%, #06264A 55%, #0B2F57 100%);
         }
 
         section[data-testid="stSidebar"] {
@@ -1565,21 +1568,32 @@ def aplicar_estilo_login():
             min-height: 100vh;
             display: flex;
             align-items: center;
-            padding-top: 1.5rem !important;
-            padding-bottom: 1.5rem !important;
+            padding-top: 1.2rem !important;
+            padding-bottom: 1.2rem !important;
         }
 
         .block-container > div {
             width: 100%;
         }
 
+        [data-testid="column"] > div > div {
+            width: 100%;
+        }
+
+        .login-brand-shell {
+            min-height: 760px;
+            display: flex;
+            align-items: center;
+        }
+
         .login-brand {
-            min-height: 720px;
+            width: 100%;
+            min-height: 700px;
             border-radius: 32px;
-            padding: 42px 42px;
-            background: linear-gradient(180deg, rgba(7, 33, 66, 0.96) 0%, rgba(4, 35, 74, 0.98) 100%);
-            border: 1px solid rgba(88, 140, 220, 0.28);
-            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+            padding: 52px 46px;
+            background: linear-gradient(180deg, rgba(3, 18, 38, 0.78), rgba(6, 28, 56, 0.90));
+            border: 1px solid rgba(126, 166, 230, 0.12);
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
             display: flex;
             align-items: center;
         }
@@ -1594,177 +1608,191 @@ def aplicar_estilo_login():
         }
 
         .login-brand-logo img {
-            max-width: 126px;
+            max-width: 132px;
             width: 100%;
-            height: auto;
             display: block;
         }
 
         .brand-kicker {
-            color: #71B6FF;
-            font-size: 13px;
+            color: #DCE8F7;
+            font-size: 15px;
             font-weight: 600;
-            margin-bottom: 16px;
+            margin-bottom: 18px;
         }
 
         .brand-title-main {
             color: #FFFFFF;
-            font-size: 66px;
+            font-size: 60px;
             line-height: 1.02;
             font-weight: 800;
-            margin: 0;
+            margin: 0 0 10px 0;
         }
 
         .brand-title-sub {
-            color: #6FAEFF;
-            font-size: 40px;
-            line-height: 1.08;
-            font-weight: 700;
-            margin: 10px 0 26px 0;
+            color: #F3F7FD;
+            font-size: 34px;
+            line-height: 1.18;
+            font-weight: 500;
+            margin: 0 0 28px 0;
+            max-width: 520px;
+        }
+
+        .brand-accent {
+            width: 76px;
+            height: 4px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #FF4FA0 0%, #F062C0 100%);
+            margin: 0 0 30px 0;
         }
 
         .brand-description {
-            color: #E4EEFA;
+            color: #DCE7F5;
             font-size: 18px;
-            line-height: 1.65;
+            line-height: 1.70;
             margin: 0 0 26px 0;
-            max-width: 520px;
+            max-width: 540px;
         }
 
         .brand-benefits {
             list-style: none;
             padding: 0;
-            margin: 0 0 28px 0;
+            margin: 0 0 30px 0;
+            max-width: 540px;
         }
 
         .brand-benefits li {
-            color: #F3F8FF;
+            color: #F7FBFF;
             font-size: 17px;
             line-height: 1.55;
-            margin-bottom: 14px;
+            padding: 16px 0;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 14px;
+            border-bottom: 1px solid rgba(135, 164, 201, 0.14);
+        }
+
+        .brand-benefits li:last-child {
+            border-bottom: none;
         }
 
         .brand-check {
             width: 18px;
             height: 18px;
             min-width: 18px;
-            border-radius: 999px;
+            border-radius: 6px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            background: rgba(60, 126, 255, 0.18);
-            border: 1px solid rgba(111, 174, 255, 0.35);
-            color: #A8CCFF;
+            border: 1px solid rgba(130, 176, 255, 0.26);
+            color: #D6E7FF;
             font-size: 12px;
             font-weight: 700;
-        }
-
-        .brand-divider {
-            height: 1px;
-            width: 100%;
-            max-width: 520px;
-            background: rgba(133, 163, 204, 0.22);
-            margin: 18px 0 22px 0;
+            background: rgba(255,255,255,0.03);
         }
 
         .brand-footer {
-            color: #B9CAE0;
+            color: #AFC2D8;
             font-size: 16px;
             line-height: 1.6;
-            max-width: 520px;
         }
 
         .login-panel-wrap {
-            min-height: 720px;
+            min-height: 760px;
             display: flex;
             align-items: center;
+            justify-content: center;
+        }
+
+        .login-panel-box {
+            width: 100%;
+            display: flex;
             justify-content: center;
         }
 
         .login-panel {
             width: 100%;
-            max-width: 520px;
-            margin: auto;
-            padding: 38px 34px 30px 34px;
-            background: rgba(2, 21, 46, 0.84);
-            border: 1px solid rgba(88, 140, 220, 0.22);
-            border-radius: 30px;
-            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+            max-width: 640px;
+            padding: 42px 38px 34px 38px;
+            background: linear-gradient(180deg, rgba(14, 43, 86, 0.72), rgba(10, 34, 69, 0.82));
+            border: 1px solid rgba(170, 198, 236, 0.28);
+            border-radius: 28px;
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.24);
+            backdrop-filter: blur(8px);
         }
 
         .login-panel-top-icon {
-            width: 72px;
-            height: 72px;
-            margin: 0 auto 18px auto;
+            width: 74px;
+            height: 74px;
+            margin: 0 auto 20px auto;
             border-radius: 999px;
-            border: 1px solid rgba(111, 174, 255, 0.20);
+            border: 1px solid rgba(112, 165, 255, 0.20);
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #2E7DFF;
+            color: #4B8DFF;
             font-size: 30px;
+            background: rgba(255,255,255,0.02);
         }
 
         .login-panel h2 {
-            margin: 0 0 12px 0;
+            margin: 0 0 10px 0;
             text-align: center;
             color: #FFFFFF;
-            font-size: 28px;
+            font-size: 30px;
             line-height: 1.15;
             font-weight: 800;
         }
 
         .login-panel .sub {
             text-align: center;
-            color: #CBD8EA;
+            color: #D2DEEC;
             font-size: 15px;
-            line-height: 1.5;
-            margin-bottom: 24px;
+            line-height: 1.55;
+            margin-bottom: 26px;
         }
 
         .stTextInput label {
-            color: #E8F0FB !important;
+            color: #EDF4FD !important;
             font-weight: 600 !important;
+            font-size: 14px !important;
         }
 
         .stTextInput > div > div > input {
             background: rgba(255,255,255,0.05) !important;
             color: #FFFFFF !important;
-            border: 1px solid rgba(150, 184, 227, 0.22) !important;
+            border: 1px solid rgba(159, 188, 227, 0.20) !important;
             border-radius: 12px !important;
-            min-height: 48px !important;
+            min-height: 52px !important;
+            padding-left: 14px !important;
         }
 
         .stTextInput > div > div > input::placeholder {
-            color: #8EA7C6 !important;
+            color: #8FA8C7 !important;
         }
 
         .stButton > button {
             width: 100%;
-            min-height: 50px;
+            min-height: 52px;
             border-radius: 14px;
             font-weight: 700;
             font-size: 16px;
-            border: 1px solid rgba(70, 122, 214, 0.55);
-            background: linear-gradient(180deg, #1E56BA 0%, #1A4EAB 100%);
+            border: 1px solid rgba(85, 133, 220, 0.55);
+            background: linear-gradient(180deg, #2458BC 0%, #224EAC 100%);
             color: #FFFFFF;
-            box-shadow: 0 8px 22px rgba(20, 64, 146, 0.20);
+            box-shadow: 0 8px 24px rgba(22, 70, 158, 0.20);
         }
 
         .login-panel-divider {
             height: 1px;
-            background: rgba(133, 163, 204, 0.18);
+            background: rgba(143, 169, 205, 0.18);
             margin: 22px 0 18px 0;
         }
 
         .login-panel-footer {
             text-align: center;
-            color: #AABDD6;
+            color: #B3C4D9;
             font-size: 14px;
-            line-height: 1.5;
+            line-height: 1.55;
         }
 
         @media (max-width: 1100px) {
@@ -1776,21 +1804,26 @@ def aplicar_estilo_login():
                 padding-bottom: 1rem !important;
             }
 
-            .login-brand,
+            .login-brand-shell,
             .login-panel-wrap {
                 min-height: auto;
             }
 
+            .login-brand {
+                min-height: auto;
+                margin-bottom: 18px;
+            }
+
             .login-panel {
-                margin-top: 20px;
+                max-width: 100%;
             }
 
             .brand-title-main {
-                font-size: 52px;
+                font-size: 48px;
             }
 
             .brand-title-sub {
-                font-size: 32px;
+                font-size: 28px;
             }
         }
 
@@ -1801,16 +1834,16 @@ def aplicar_estilo_login():
             }
 
             .login-panel {
-                padding: 24px 18px 22px 18px;
+                padding: 26px 18px 22px 18px;
                 border-radius: 24px;
             }
 
             .brand-title-main {
-                font-size: 42px;
+                font-size: 38px;
             }
 
             .brand-title-sub {
-                font-size: 26px;
+                font-size: 24px;
             }
 
             .brand-description,
@@ -2159,32 +2192,66 @@ if invite_token:
 if not st.session_state.get("logado", False):
     aplicar_estilo_login()
 
-    col_left, col_right = st.columns([1.08, 0.92], gap="large")
+    col_left, col_right = st.columns([1.05, 0.95], gap="large")
 
     with col_left:
-        st.markdown('<div class="glass-card glass-card-left">', unsafe_allow_html=True)
-
-        st.markdown("### Plataforma corporativa")
-        if logo_b64:
-            st.image(f"data:image/png;base64,{logo_b64}")
-        st.markdown("# Gestão RH")
-        st.markdown("## Controle e inteligência para sua operação")
-        st.write(
-            "Centralize estrutura organizacional, usuários, colaboradores e indicadores "
-            "em um ambiente seguro, escalável e orientado por dados."
+        st.markdown(
+            '<div class="login-brand-shell"><div class="login-brand"><div class="login-brand-inner">',
+            unsafe_allow_html=True,
         )
-        st.write("✓ Controle do quadro em tempo real")
-        st.write("✓ Estrutura por filiais, setores e cargos")
-        st.write("✓ Acesso segregado por empresa")
-        st.caption("Arquitetura SaaS • Segurança • Performance")
 
-        st.markdown("</div>", unsafe_allow_html=True)
+        if logo_b64:
+            st.markdown(
+                f"""
+                <div class="login-brand-logo">
+                    <img src="data:image/png;base64,{logo_b64}">
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            """
+            <div class="brand-kicker">Plataforma corporativa</div>
+            <div class="brand-title-main">Gestão RH</div>
+            <div class="brand-title-sub">Controle e inteligência para sua operação</div>
+            <div class="brand-accent"></div>
+
+            <div class="brand-description">
+                Centralize estrutura organizacional, usuários, colaboradores e indicadores
+                em um ambiente seguro, escalável e orientado por dados.
+            </div>
+
+            <ul class="brand-benefits">
+                <li><span class="brand-check">↗</span> Controle do quadro em tempo real</li>
+                <li><span class="brand-check">▣</span> Estrutura por filiais, setores e cargos</li>
+                <li><span class="brand-check">✓</span> Acesso segregado por empresa</li>
+            </ul>
+
+            <div class="brand-footer">
+                Arquitetura SaaS • Segurança • Performance
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("</div></div></div>", unsafe_allow_html=True)
 
     with col_right:
-        st.markdown('<div class="glass-card glass-card-right">', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="login-panel-wrap"><div class="login-panel-box"><div class="login-panel">',
+            unsafe_allow_html=True,
+        )
 
-        st.markdown("## Acessar plataforma")
-        st.caption("Entre com seu usuário corporativo.")
+        st.markdown(
+            '<div class="login-panel-top-icon">👤</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("<h2>Acessar plataforma</h2>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='sub'>Entre com seu usuário corporativo.</div>",
+            unsafe_allow_html=True,
+        )
 
         usuario_input = st.text_input(
             "Usuário ou e-mail",
@@ -2207,6 +2274,7 @@ if not st.session_state.get("logado", False):
                 st.error("Informe usuário e senha.")
             else:
                 usuario = autenticar_usuario(usuario_digitado, senha_digitada)
+
                 if usuario:
                     registrar_sessao_usuario(usuario)
                     st.rerun()
@@ -2217,9 +2285,13 @@ if not st.session_state.get("logado", False):
                 else:
                     st.error("Usuário ou senha inválidos.")
 
-        st.caption("Ambiente seguro e preparado para empresas.")
+        st.markdown('<div class="login-panel-divider"></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="login-panel-footer">Ambiente seguro e preparado para empresas.</div>',
+            unsafe_allow_html=True,
+        )
 
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div></div></div>", unsafe_allow_html=True)
 
     st.stop()
 
