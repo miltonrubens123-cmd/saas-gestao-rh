@@ -317,6 +317,76 @@ def exigir_perfil(*perfis):
         st.stop()
 
 
+def criar_empresa(nome, cnpj=None):
+    result = conn.execute(
+        """
+        INSERT INTO empresas (
+            razao_social,
+            fantasia,
+            cnpj,
+            ativo,
+            plano,
+            limite_colaboradores,
+            limite_usuarios
+        )
+        VALUES (%s, %s, %s, TRUE, 'Free', 10, 3)
+        RETURNING id
+        """,
+        (nome, nome, cnpj),
+    ).fetchone()
+
+    return result["id"]
+
+
+if "modo_cadastro" not in st.session_state:
+    st.session_state.modo_cadastro = False
+
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("Entrar"):
+        st.session_state.modo_cadastro = False
+
+with col2:
+    if st.button("Criar conta"):
+        st.session_state.modo_cadastro = True
+
+if st.session_state.modo_cadastro:
+
+    st.title("Criar conta - Gestão RH")
+
+    nome_empresa = st.text_input("Nome da empresa")
+    cnpj = st.text_input("CNPJ (opcional)")
+
+    nome_admin = st.text_input("Seu nome")
+    email_admin = st.text_input("Seu e-mail")
+    usuario_admin = st.text_input("Usuário")
+    senha_admin = st.text_input("Senha", type="password")
+
+    if st.button("Criar minha conta"):
+        try:
+            empresa_id = criar_empresa(nome_empresa, cnpj)
+
+            criar_usuario_empresa(
+                empresa_id=empresa_id,
+                nome=nome_admin,
+                email=email_admin,
+                usuario=usuario_admin,
+                senha=senha_admin,
+                perfil="admin",
+            )
+
+            usuario = obter_usuario_por_login(usuario_admin)
+
+            registrar_sessao_usuario(usuario)
+
+            st.success("Conta criada com sucesso!")
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"Erro ao criar conta: {e}")
+
+
 def obter_usuario_por_login(login):
     return conn.execute(
         """
@@ -1952,6 +2022,7 @@ if not st.session_state.logado:
                     st.error("Usuário ou senha inválidos.")
     st.stop()
 
+
 def validar_limite_usuarios_empresa(empresa_id):
     empresa = conn.execute(
         """
@@ -2442,7 +2513,6 @@ if menu == "Usuários da Empresa" and perfil_atual == "admin":
                         ):
                             st.session_state.usuario_empresa_editando_id = None
                             st.rerun()
-
 
 
 if menu == "Nova Solicitação":
@@ -3076,9 +3146,15 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         (empresa_id,),
     ).fetchone()
 
-    plano_nome = (empresa_info["plano"] if empresa_info and empresa_info.get("plano") else "não definido")
+    plano_nome = (
+        empresa_info["plano"]
+        if empresa_info and empresa_info.get("plano")
+        else "não definido"
+    )
     limite_usuarios = empresa_info["limite_usuarios"] if empresa_info else None
-    limite_colaboradores = empresa_info["limite_colaboradores"] if empresa_info else None
+    limite_colaboradores = (
+        empresa_info["limite_colaboradores"] if empresa_info else None
+    )
     usados_usuarios = total_usuarios_empresa["total"] if total_usuarios_empresa else 0
     usados_colaboradores = (
         total_colaboradores_ativos_empresa["total"]
@@ -3096,7 +3172,6 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         "Colaboradores ativos",
         f"{usados_colaboradores} / {limite_colaboradores if limite_colaboradores is not None else 'Ilimitado'}",
     )
-
 
     dados = conn.execute(
         """
@@ -3158,9 +3233,15 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
     ).fetchone()
 
     estrutura1, estrutura2, estrutura3 = st.columns(3)
-    estrutura1.metric("Filiais", total_filiais_empresa["total"] if total_filiais_empresa else 0)
-    estrutura2.metric("Setores", total_setores_empresa["total"] if total_setores_empresa else 0)
-    estrutura3.metric("Cargos", total_cargos_empresa["total"] if total_cargos_empresa else 0)
+    estrutura1.metric(
+        "Filiais", total_filiais_empresa["total"] if total_filiais_empresa else 0
+    )
+    estrutura2.metric(
+        "Setores", total_setores_empresa["total"] if total_setores_empresa else 0
+    )
+    estrutura3.metric(
+        "Cargos", total_cargos_empresa["total"] if total_cargos_empresa else 0
+    )
 
     if df.empty:
         st.info(
