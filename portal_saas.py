@@ -769,12 +769,14 @@ def aplicar_estilo_login():
     st.markdown(
         """
         <style>
-        body {
-            background-color: #0f172a;
-        }
-
         .stApp {
             background: linear-gradient(135deg, #0f172a, #1e3a8a);
+        }
+
+        .block-container {
+            max-width: 1400px;
+            padding-top: 2rem !important;
+            padding-bottom: 2rem !important;
         }
 
         input {
@@ -1233,7 +1235,13 @@ def persistir_query_params():
 
 
 if not st.session_state.logado:
+    restaurar_login()
+    persistir_query_params()
+
+if not st.session_state.logado:
     aplicar_estilo_login()
+    ...
+    st.stop()
 
     modo_acesso = st.session_state.get("modo_acesso", "login")
 
@@ -1241,11 +1249,11 @@ if not st.session_state.logado:
         """
         <style>
         .login-shell {
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-        }
-        .login-brand {
+        min-height: calc(100vh - 4rem);
+        display: flex;
+        align-items: center;
+    }
+            .login-brand {
             min-height: 760px;
             border-radius: 28px;
             padding: 56px 48px;
