@@ -1011,6 +1011,42 @@ def criar_sessao_login(
     return token
 
 
+def classificar_status_vencimento(data_vencimento):
+    if not data_vencimento:
+        return "Vigente"
+
+    hoje = agora().date()
+    if hasattr(data_vencimento, "date"):
+        data_vencimento = data_vencimento.date()
+
+    dias = (data_vencimento - hoje).days
+
+    if dias < 0:
+        return "Vencido"
+    elif dias <= 30:
+        return "A vencer"
+    return "Vigente"
+
+
+def atualizar_status_documentos_sst_empresa(empresa_id):
+    conn.execute(
+        """
+        UPDATE documentos_sst
+        SET
+            status = CASE
+                WHEN revisao_necessaria = TRUE THEN 'Revisão necessária'
+                WHEN data_vencimento IS NULL THEN 'Vigente'
+                WHEN data_vencimento < CURRENT_DATE THEN 'Vencido'
+                WHEN data_vencimento <= CURRENT_DATE + INTERVAL '30 days' THEN 'A vencer'
+                ELSE 'Vigente'
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE empresa_id = %s
+        """,
+        (empresa_id,),
+    )
+
+
 def atualizar_menu_sessao(token, menu):
     if not token:
         return
@@ -1219,6 +1255,44 @@ def obter_clientes_ativos():
         WHERE ativo = TRUE
         ORDER BY nome, usuario
         """
+    ).fetchall()
+
+
+@st.cache_data(ttl=60)
+def listar_tipos_documento_sst():
+    return conn.execute(
+        """
+        SELECT id, codigo, nome, escopo, periodicidade_meses, exige_revisao_por_evento
+        FROM tipos_documento_sst
+        WHERE ativo = TRUE
+        ORDER BY nome
+        """
+    ).fetchall()
+
+
+@st.cache_data(ttl=60)
+def listar_filiais_ativas(empresa_id):
+    return conn.execute(
+        """
+        SELECT id, nome
+        FROM filiais
+        WHERE empresa_id = %s AND ativo = TRUE
+        ORDER BY nome
+        """,
+        (empresa_id,),
+    ).fetchall()
+
+
+@st.cache_data(ttl=60)
+def listar_colaboradores_ativos(empresa_id):
+    return conn.execute(
+        """
+        SELECT id, nome
+        FROM colaboradores
+        WHERE empresa_id = %s AND ativo = TRUE
+        ORDER BY nome
+        """,
+        (empresa_id,),
     ).fetchall()
 
 
@@ -1520,6 +1594,72 @@ def criar_convite(nome, email, empresa_id, tipo_usuario, observacao=""):
         "email_enviado": email_enviado,
         "email_msg": email_msg,
     }
+
+
+def calcular_vencimento_documento(data_emissao, periodicidade_meses):
+    if not data_emissao or not periodicidade_meses:
+        return None
+    return (
+        pd.Timestamp(data_emissao) + pd.DateOffset(months=int(periodicidade_meses))
+    ).date()
+
+
+def classificar_status_vencimento(data_vencimento, revisao_necessaria=False):
+    if revisao_necessaria:
+        return "Revisão necessária"
+
+    if not data_vencimento:
+        return "Vigente"
+
+    hoje = agora().date()
+    if hasattr(data_vencimento, "date"):
+        data_vencimento = data_vencimento.date()
+
+    dias = (data_vencimento - hoje).days
+
+    if dias < 0:
+        return "Vencido"
+    elif dias <= 30:
+        return "A vencer"
+    return "Vigente"
+
+
+def validar_upload_documento_sst(arquivo):
+    nome = (arquivo.name or "").lower()
+    ext = Path(nome).suffix.lower()
+    permitidos = {".pdf", ".png", ".jpg", ".jpeg"}
+
+    if ext not in permitidos:
+        return False, "Tipo de arquivo inválido. Envie PDF, PNG, JPG ou JPEG."
+
+    tamanho = len(arquivo.getvalue())
+    limite = MAX_UPLOAD_MB * 1024 * 1024
+
+    if tamanho > limite:
+        return False, f"O arquivo excede o limite de {MAX_UPLOAD_MB} MB."
+
+    return True, ""
+
+
+def registrar_evento_revisao_sst(
+    empresa_id, filial_id, tipo_evento, descricao, data_evento
+):
+    conn.execute(
+        """
+        INSERT INTO eventos_revisao_sst (
+            empresa_id, filial_id, tipo_evento, descricao, data_evento, created_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            empresa_id,
+            filial_id,
+            tipo_evento,
+            descricao.strip(),
+            data_evento,
+            agora(),
+        ),
+    )
 
 
 def reenviar_convite(convite_id):
