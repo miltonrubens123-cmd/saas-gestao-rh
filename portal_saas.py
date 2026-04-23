@@ -1952,7 +1952,7 @@ if not st.session_state.logado:
                     st.error("Usuário ou senha inválidos.")
     st.stop()
 
-elif menu == "Usuários da Empresa" and perfil_atual == "admin":
+if menu == "Usuários da Empresa" and perfil_atual == "admin":
     exigir_perfil("admin")
     st.header("Usuários da Empresa")
 
@@ -3075,15 +3075,9 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         (empresa_id,),
     ).fetchone()
 
-    plano_nome = (
-        empresa_info["plano"]
-        if empresa_info and empresa_info.get("plano")
-        else "não definido"
-    )
+    plano_nome = (empresa_info["plano"] if empresa_info and empresa_info.get("plano") else "não definido")
     limite_usuarios = empresa_info["limite_usuarios"] if empresa_info else None
-    limite_colaboradores = (
-        empresa_info["limite_colaboradores"] if empresa_info else None
-    )
+    limite_colaboradores = empresa_info["limite_colaboradores"] if empresa_info else None
     usados_usuarios = total_usuarios_empresa["total"] if total_usuarios_empresa else 0
     usados_colaboradores = (
         total_colaboradores_ativos_empresa["total"]
@@ -3101,6 +3095,7 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
         "Colaboradores ativos",
         f"{usados_colaboradores} / {limite_colaboradores if limite_colaboradores is not None else 'Ilimitado'}",
     )
+
 
     dados = conn.execute(
         """
@@ -3162,19 +3157,13 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
     ).fetchone()
 
     estrutura1, estrutura2, estrutura3 = st.columns(3)
-    estrutura1.metric(
-        "Filiais", total_filiais_empresa["total"] if total_filiais_empresa else 0
-    )
-    estrutura2.metric(
-        "Setores", total_setores_empresa["total"] if total_setores_empresa else 0
-    )
-    estrutura3.metric(
-        "Cargos", total_cargos_empresa["total"] if total_cargos_empresa else 0
-    )
+    estrutura1.metric("Filiais", total_filiais_empresa["total"] if total_filiais_empresa else 0)
+    estrutura2.metric("Setores", total_setores_empresa["total"] if total_setores_empresa else 0)
+    estrutura3.metric("Cargos", total_cargos_empresa["total"] if total_cargos_empresa else 0)
 
     if df.empty:
         st.info(
-            """🚀 Bem-vindo ao  Portal de Gestão RH
+            """🚀 Bem-vindo ao Gestão RH
 
 Para começar:
 1. Cadastre uma filial
