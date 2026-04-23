@@ -1094,32 +1094,7 @@ def init_state():
 init_state()
 
 
-def get_state_cache_bucket():
-    return st.session_state.setdefault("_data_cache", {})
-
-
-def obter_cache_estado(chave, loader):
-    cache = get_state_cache_bucket()
-    if chave not in cache:
-        cache[chave] = loader()
-    return cache[chave]
-
-
-def invalidar_cache_estado(prefixos=None):
-    cache = st.session_state.get("_data_cache")
-    if not cache:
-        return
-    if not prefixos:
-        st.session_state["_data_cache"] = {}
-        return
-    chaves = list(cache.keys())
-    for chave in chaves:
-        if any(str(chave).startswith(prefixo) for prefixo in prefixos):
-            cache.pop(chave, None)
-
-
 def limpar_caches_aplicacao():
-    invalidar_cache_estado()
     try:
         listar_tipos_documento_sst.clear()
     except Exception:
@@ -1352,7 +1327,7 @@ def nova_solicitacao():
     st.rerun()
 
 
-def paginar_registros(registros, state_key, page_size=10):
+def paginar_registros(registros, state_key, page_size=12):
     total = len(registros or [])
     if total <= page_size:
         return registros, 1, 1
@@ -1600,78 +1575,6 @@ def obter_documentos_sst_painel(empresa_id):
 
 
 
-def obter_solicitacoes_filtradas_cached(
-    cache_namespace,
-    cliente_id=None,
-    cliente_usuario=None,
-    empresa_id=None,
-    status_filtro="Todos",
-    prioridade_filtro="Todas",
-    busca="",
-    limite=50,
-    atendente_usuario=None,
-):
-    chave = (
-        "solicitacoes",
-        cache_namespace,
-        cliente_id,
-        cliente_usuario or "",
-        empresa_id,
-        status_filtro,
-        prioridade_filtro,
-        (busca or "").strip().lower(),
-        limite,
-        atendente_usuario or "",
-    )
-    return obter_cache_estado(
-        chave,
-        lambda: obter_solicitacoes_filtradas(
-            cliente_id=cliente_id,
-            cliente_usuario=cliente_usuario,
-            empresa_id=empresa_id,
-            status_filtro=status_filtro,
-            prioridade_filtro=prioridade_filtro,
-            busca=busca,
-            limite=limite,
-            atendente_usuario=atendente_usuario,
-        ),
-    )
-
-
-def obter_empresas_resumo_cached():
-    return obter_cache_estado("empresas_resumo", lambda: listar_empresas_resumo())
-
-
-def obter_todos_atendentes_cached():
-    return obter_cache_estado("operadores_todos", lambda: obter_todos_atendentes())
-
-
-def obter_colaboradores_cadastro_cached(empresa_id):
-    chave = ("colaboradores_cadastro", empresa_id)
-    return obter_cache_estado(
-        chave,
-        lambda: conn.execute(
-            """
-            SELECT c.id, c.matricula, c.nome, c.cpf, c.data_nascimento, c.data_admissao, c.data_desligamento, c.email, c.telefone,
-                   c.filial_id, c.setor_id, c.cargo_id, c.status, c.ativo,
-                   f.nome AS filial_nome, s.nome AS setor_nome, cg.nome AS cargo_nome
-            FROM colaboradores c
-            LEFT JOIN filiais f ON f.id = c.filial_id AND f.empresa_id = c.empresa_id
-            LEFT JOIN setores s ON s.id = c.setor_id AND s.empresa_id = c.empresa_id
-            LEFT JOIN cargos cg ON cg.id = c.cargo_id AND cg.empresa_id = c.empresa_id
-            WHERE c.empresa_id = %s
-            ORDER BY c.nome
-            """,
-            (empresa_id,),
-        ).fetchall(),
-    )
-
-
-def obter_documentos_sst_painel_cached(empresa_id):
-    chave = ("documentos_sst_painel", empresa_id)
-    return obter_cache_estado(chave, lambda: obter_documentos_sst_painel(empresa_id))
-
-
 def formatar_data_br(valor):
     if not valor:
         return "-"
@@ -1684,7 +1587,7 @@ def formatar_data_br(valor):
         return "-"
 
 
-def dataframe_paginated(df, state_key, page_size=10):
+def dataframe_paginated(df, state_key, page_size=15):
     registros = df.to_dict("records") if not df.empty else []
     pagina, _, _ = paginar_registros(registros, state_key=state_key, page_size=page_size)
     if not pagina:
@@ -3583,34 +3486,31 @@ elif menu == "Demandas Solicitadas":
         )
 
     if perfil_atual == "admin":
-        dados = obter_solicitacoes_filtradas_cached(
-            cache_namespace=f"admin_{get_empresa_contexto()}",
+        dados = obter_solicitacoes_filtradas(
             empresa_id=get_empresa_contexto(),
             status_filtro=status_filtro,
             prioridade_filtro=prioridade_filtro,
             busca=busca_filtro,
-            limite=150,
+            limite=400,
         )
     elif perfil_atual == "atendente":
-        dados = obter_solicitacoes_filtradas_cached(
-            cache_namespace=f"atendente_{st.session_state.usuario}",
+        dados = obter_solicitacoes_filtradas(
             status_filtro=status_filtro,
             prioridade_filtro=prioridade_filtro,
             busca=busca_filtro,
-            limite=120,
+            limite=300,
             atendente_usuario=st.session_state.usuario,
         )
     else:
         cliente_logado = obter_cliente_por_usuario(st.session_state.usuario)
         dados = (
-            obter_solicitacoes_filtradas_cached(
-                cache_namespace=f"cliente_{cliente_logado['id']}",
+            obter_solicitacoes_filtradas(
                 cliente_id=cliente_logado["id"],
                 cliente_usuario=cliente_logado["usuario"],
                 status_filtro=status_filtro,
                 prioridade_filtro=prioridade_filtro,
                 busca=busca_filtro,
-                limite=80,
+                limite=200,
             )
             if cliente_logado
             else []
@@ -3631,7 +3531,7 @@ elif menu == "Demandas Solicitadas":
             cols.insert(2, "cliente")
         if perfil_atual == "admin":
             cols.append("atendente_nome")
-        grid = dataframe_paginated(df[cols], "pagina_demandas_grid", page_size=10)
+        grid = dataframe_paginated(df[cols], "pagina_demandas_grid", page_size=15)
         st.dataframe(
             grid.rename(
                 columns={
@@ -3945,8 +3845,7 @@ elif menu == "Cadastro de Empresas" and perfil_atual in ("superadmin", "operador
 
     st.markdown("---")
     st.subheader("Empresas cadastradas")
-    empresas_cache = obter_empresas_resumo_cached()
-    empresas = pd.DataFrame(empresas_cache) if empresas_cache else pd.DataFrame()
+    empresas = pd.DataFrame(listar_empresas_resumo()) if listar_empresas_resumo() else pd.DataFrame()
     if empresas.empty:
         st.info("Nenhuma empresa cadastrada ainda.")
     else:
@@ -3954,7 +3853,7 @@ elif menu == "Cadastro de Empresas" and perfil_atual in ("superadmin", "operador
         grid["empresa"] = grid["fantasia"].fillna("")
         grid.loc[grid["empresa"] == "", "empresa"] = grid["razao_social"].fillna("Empresa sem nome")
         grid["status"] = grid["ativo"].apply(lambda x: "Ativa" if bool(x) else "Inativa")
-        grid = dataframe_paginated(grid[["id", "empresa", "cnpj", "cidade", "status"]], "pagina_empresas_grid", page_size=10)
+        grid = dataframe_paginated(grid[["id", "empresa", "cnpj", "cidade", "status"]], "pagina_empresas_grid", page_size=12)
         st.dataframe(grid.rename(columns={"id": "ID", "empresa": "Empresa", "cnpj": "CNPJ", "cidade": "Cidade", "status": "Status"}), use_container_width=True, hide_index=True)
 
         opcoes = opcoes_select_por_id(empresas, lambda row: f"{int(row['id'])} • {(row['fantasia'] or row['razao_social'] or 'Empresa sem nome')}")
@@ -4254,15 +4153,27 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
 
     st.markdown("---")
     st.subheader("Colaboradores cadastrados")
-    colaboradores_cache = obter_colaboradores_cadastro_cached(empresa_id)
-    colaboradores = pd.DataFrame(colaboradores_cache)
+    colaboradores = pd.DataFrame(conn.execute(
+        """
+        SELECT c.id, c.matricula, c.nome, c.cpf, c.data_nascimento, c.data_admissao, c.data_desligamento, c.email, c.telefone,
+               c.filial_id, c.setor_id, c.cargo_id, c.status, c.ativo,
+               f.nome AS filial_nome, s.nome AS setor_nome, cg.nome AS cargo_nome
+        FROM colaboradores c
+        LEFT JOIN filiais f ON f.id = c.filial_id AND f.empresa_id = c.empresa_id
+        LEFT JOIN setores s ON s.id = c.setor_id AND s.empresa_id = c.empresa_id
+        LEFT JOIN cargos cg ON cg.id = c.cargo_id AND cg.empresa_id = c.empresa_id
+        WHERE c.empresa_id = %s
+        ORDER BY c.nome
+        """,
+        (empresa_id,),
+    ).fetchall())
     if colaboradores.empty:
         st.info("Nenhum colaborador cadastrado ainda.")
     else:
         grid = colaboradores.copy()
         grid["ativo_exibicao"] = grid["ativo"].apply(lambda x: "Ativo" if bool(x) else "Inativo")
         grid["admissao"] = pd.to_datetime(grid["data_admissao"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("-")
-        grid = dataframe_paginated(grid[["id", "nome", "matricula", "filial_nome", "setor_nome", "cargo_nome", "status", "ativo_exibicao", "admissao"]], "pagina_colaboradores_grid", page_size=10)
+        grid = dataframe_paginated(grid[["id", "nome", "matricula", "filial_nome", "setor_nome", "cargo_nome", "status", "ativo_exibicao", "admissao"]], "pagina_colaboradores_grid", page_size=12)
         st.dataframe(grid.rename(columns={"id": "ID", "nome": "Nome", "matricula": "Matrícula", "filial_nome": "Filial", "setor_nome": "Setor", "cargo_nome": "Cargo", "status": "Status", "ativo_exibicao": "Registro", "admissao": "Admissão"}), use_container_width=True, hide_index=True)
 
         opcoes = opcoes_select_por_id(colaboradores, lambda row: f"{int(row['id'])} • {row['nome']}")
@@ -5044,8 +4955,7 @@ elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
     with filtro3:
         filtro_filial_sst = st.selectbox("Filial", ["Todas"] + [row["nome"] for row in filiais], key="filtro_filial_sst")
 
-    documentos_cache = obter_documentos_sst_painel_cached(empresa_id)
-    documentos = pd.DataFrame(documentos_cache) if documentos_cache else pd.DataFrame()
+    documentos = pd.DataFrame(obter_documentos_sst_painel(empresa_id)) if obter_documentos_sst_painel(empresa_id) else pd.DataFrame()
     if documentos.empty:
         st.info("Nenhum documento SST encontrado com os filtros aplicados.")
     else:
@@ -5064,7 +4974,7 @@ elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
             grid["vencimento"] = grid["data_vencimento"].apply(formatar_data_br)
             grid["filial"] = grid["filial_nome"].fillna("Empresa / Geral")
             grid["colaborador"] = grid["colaborador_nome"].fillna("-")
-            grid = dataframe_paginated(grid[["id", "titulo", "tipo_documento", "filial", "colaborador", "status", "vencimento"]], "pagina_documentos_sst_grid", page_size=10)
+            grid = dataframe_paginated(grid[["id", "titulo", "tipo_documento", "filial", "colaborador", "status", "vencimento"]], "pagina_documentos_sst_grid", page_size=12)
             st.dataframe(grid.rename(columns={"id": "ID", "titulo": "Título", "tipo_documento": "Tipo", "filial": "Filial", "colaborador": "Colaborador", "status": "Status", "vencimento": "Vencimento"}), use_container_width=True, hide_index=True)
 
             opcoes = opcoes_select_por_id(documentos, lambda row: f"{int(row['id'])} • {row['titulo']}")
@@ -5241,14 +5151,13 @@ elif menu == "Cadastro de Operadores" and perfil_atual in ("superadmin", "operad
 
     st.markdown("---")
     st.subheader("Operadores cadastrados")
-    operadores_cache = obter_todos_atendentes_cached()
-    operadores = pd.DataFrame(operadores_cache) if operadores_cache else pd.DataFrame()
+    operadores = pd.DataFrame(obter_todos_atendentes()) if obter_todos_atendentes() else pd.DataFrame()
     if operadores.empty:
         st.info("Nenhum operador cadastrado ainda.")
     else:
         grid = operadores.copy()
         grid["status"] = grid["ativo"].apply(lambda x: "Ativo" if bool(x) else "Inativo")
-        grid = dataframe_paginated(grid[["id", "usuario", "nome", "email", "status"]], "pagina_operadores_grid", page_size=10)
+        grid = dataframe_paginated(grid[["id", "usuario", "nome", "email", "status"]], "pagina_operadores_grid", page_size=12)
         st.dataframe(grid.rename(columns={"id": "ID", "usuario": "Usuário", "nome": "Nome", "email": "E-mail", "status": "Status"}), use_container_width=True, hide_index=True)
 
         opcoes = opcoes_select_por_id(operadores, lambda row: f"{int(row['id'])} • {row['usuario']}")
