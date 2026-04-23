@@ -20,6 +20,7 @@ import streamlit as st
 from PIL import Image
 from psycopg.rows import dict_row
 from zoneinfo import ZoneInfo
+import time
 
 
 @st.cache_resource
@@ -145,6 +146,71 @@ def obter_secret(path, default=None):
         return default
 
 
+def obter_arquivo_documento(doc_id, empresa_id):
+    return conn.execute(
+        """
+        SELECT arquivo, arquivo_nome
+        FROM documentos_sst
+        WHERE id = %s AND empresa_id = %s
+        """,
+        (doc_id, empresa_id),
+    ).fetchone()
+
+
+def listar_documentos_sst(empresa_id, limite=20, offset=0):
+    return conn.execute(
+        """
+        SELECT
+            d.id,
+            d.titulo,
+            d.data_emissao,
+            d.data_vencimento,
+            d.status,
+            d.arquivo_nome,
+            td.nome AS tipo_documento,
+            td.escopo,
+            c.nome AS colaborador_nome,
+            c.matricula,
+            f.nome AS filial_nome
+        FROM documentos_sst d
+        JOIN tipos_documento_sst td ON td.id = d.tipo_documento_id
+        LEFT JOIN colaboradores c ON c.id = d.colaborador_id
+        LEFT JOIN filiais f ON f.id = d.filial_id
+        WHERE d.empresa_id = %s
+        ORDER BY d.id DESC
+        LIMIT %s OFFSET %s
+        """,
+        (empresa_id, limite, offset),
+    ).fetchall()
+
+
+@st.cache_data(ttl=30)
+def listar_documentos_sst_resumo(empresa_id):
+    return conn.execute(
+        """
+        SELECT
+            d.id,
+            d.titulo,
+            d.data_emissao,
+            d.data_vencimento,
+            d.status,
+            d.arquivo_nome,
+            td.nome AS tipo_documento,
+            td.escopo,
+            c.nome AS colaborador_nome,
+            c.matricula,
+            f.nome AS filial_nome
+        FROM documentos_sst d
+        JOIN tipos_documento_sst td ON td.id = d.tipo_documento_id
+        LEFT JOIN colaboradores c ON c.id = d.colaborador_id
+        LEFT JOIN filiais f ON f.id = d.filial_id
+        WHERE d.empresa_id = %s
+        ORDER BY d.id DESC
+        """,
+        (empresa_id,),
+    ).fetchall()
+
+
 def obter_app_base_url():
     return (obter_secret(["APP_BASE_URL"]) or os.getenv("APP_BASE_URL") or "").strip()
 
@@ -157,7 +223,7 @@ def obter_email_config():
         "user": (cfg.get("user") or os.getenv("SMTP_USER") or "").strip(),
         "password": (cfg.get("password") or os.getenv("SMTP_PASSWORD") or "").strip(),
         "from_name": (
-            cfg.get("from_name") or os.getenv("SMTP_FROM_NAME") or "Portal Arati"
+            cfg.get("from_name") or os.getenv("SMTP_FROM_NAME") or "Gestão RH"
         ).strip(),
         "from_email": (
             cfg.get("from_email") or os.getenv("SMTP_FROM_EMAIL") or ""
@@ -165,7 +231,7 @@ def obter_email_config():
     }
 
 
-def get_empresa_id():
+def get_empresa_contexto():
     empresa_id = st.session_state.get("empresa_id")
     if not empresa_id:
         st.error("Sessão inválida ou expirada. Faça login novamente.")
@@ -274,7 +340,7 @@ def enviar_email_convite(destinatario, nome, link):
     ):
         return False, "Configuração de e-mail não encontrada em st.secrets['email']."
 
-    assunto = "Convite - Portal Arati"
+    assunto = "Convite - Gestão RH"
 
     html_body = f"""
 <html>
@@ -304,7 +370,7 @@ def enviar_email_convite(destinatario, nome, link):
             <tr>
               <td align="center" style="color:#cfe3ff; font-size:14px; padding-top:15px;">
                 Olá, {nome}.<br><br>
-                Você recebeu um convite para concluir seu cadastro no Portal Arati.
+                Você recebeu um convite para concluir seu cadastro no Gestão RH.
               </td>
             </tr>
 
@@ -342,7 +408,7 @@ def enviar_email_convite(destinatario, nome, link):
             <!-- RODAPÉ -->
             <tr>
               <td align="center" style="color:#7ea6d9; font-size:12px;">
-                Portal Arati<br>
+                Gestão RH<br>
                 Plataforma de gestão de pessoas<br><br>
                 Este e-mail foi enviado automaticamente.
               </td>
@@ -472,6 +538,14 @@ def autenticar_admin(usuario_digitado, senha_digitada):
         return hmac.compare_digest(admin_password_plain, senha_digitada or "")
 
     return False
+
+
+def get_empresa_contexto():
+    empresa_id = st.session_state.get("empresa_id_contexto")
+    if not empresa_id:
+        st.error("Nenhuma empresa selecionada ou vinculada ao usuário.")
+        st.stop()
+    return empresa_id
 
 
 def obter_cliente_por_usuario(usuario):
@@ -782,6 +856,57 @@ def criar_tabelas():
         """
     )
 
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tipos_documento_sst (
+            id BIGSERIAL PRIMARY KEY,
+            codigo TEXT NOT NULL UNIQUE,
+            nome TEXT NOT NULL,
+            escopo TEXT NOT NULL,
+            periodicidade_meses INTEGER,
+            exige_revisao_por_evento BOOLEAN DEFAULT FALSE,
+            ativo BOOLEAN DEFAULT TRUE
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS documentos_sst (
+            id BIGSERIAL PRIMARY KEY,
+            empresa_id BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+            filial_id BIGINT REFERENCES filiais(id) ON DELETE SET NULL,
+            colaborador_id BIGINT REFERENCES colaboradores(id) ON DELETE SET NULL,
+            tipo_documento_id BIGINT NOT NULL REFERENCES tipos_documento_sst(id),
+            titulo TEXT NOT NULL,
+            data_emissao DATE,
+            data_vencimento DATE,
+            status TEXT DEFAULT 'Vigente',
+            observacao TEXT,
+            arquivo_nome TEXT,
+            arquivo BYTEA,
+            revisao_necessaria BOOLEAN DEFAULT FALSE,
+            criado_por BIGINT REFERENCES usuarios(id),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS eventos_revisao_sst (
+            id BIGSERIAL PRIMARY KEY,
+            empresa_id BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+            filial_id BIGINT REFERENCES filiais(id) ON DELETE SET NULL,
+            tipo_evento TEXT NOT NULL,
+            descricao TEXT,
+            data_evento DATE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
     if not coluna_existe("filiais", "licenca"):
         conn.execute("ALTER TABLE filiais ADD COLUMN licenca TEXT")
     if not coluna_existe("filiais", "empresa_id"):
@@ -799,6 +924,46 @@ def criar_tabelas():
     if not coluna_existe("colaboradores", "empresa_id"):
         conn.execute(
             "ALTER TABLE colaboradores ADD COLUMN empresa_id BIGINT REFERENCES empresas(id)"
+        )
+
+    if not coluna_existe("documentos_sst", "revisao_necessaria"):
+        conn.execute(
+            "ALTER TABLE documentos_sst ADD COLUMN revisao_necessaria BOOLEAN DEFAULT FALSE"
+        )
+    if not coluna_existe("documentos_sst", "criado_por"):
+        conn.execute(
+            "ALTER TABLE documentos_sst ADD COLUMN criado_por BIGINT REFERENCES usuarios(id)"
+        )
+    if not coluna_existe("documentos_sst", "updated_at"):
+        conn.execute(
+            "ALTER TABLE documentos_sst ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        )
+
+    tipos_sst_padrao = [
+        ("PGR", "Programa de Gerenciamento de Riscos", "empresa", 24, True),
+        ("PCMSO_RA", "PCMSO - Relatório Analítico", "empresa", 12, False),
+        ("LTCAT", "LTCAT", "empresa", 24, False),
+        ("PERICULOSIDADE", "Laudo de Periculosidade", "empresa", 24, False),
+        ("INSALUBRIDADE", "Laudo de Insalubridade", "empresa", 24, False),
+        ("AET", "Análise Ergonômica do Trabalho", "empresa", 24, True),
+        ("PAE", "Plano de Atendimento à Emergência", "empresa", 12, False),
+        ("ASO_PERIODICO", "ASO Periódico", "colaborador", 12, False),
+    ]
+
+    for codigo, nome, escopo, periodicidade_meses, exige_revisao in tipos_sst_padrao:
+        conn.execute(
+            """
+            INSERT INTO tipos_documento_sst
+            (codigo, nome, escopo, periodicidade_meses, exige_revisao_por_evento, ativo)
+            VALUES (%s, %s, %s, %s, %s, TRUE)
+            ON CONFLICT (codigo) DO UPDATE
+            SET nome = EXCLUDED.nome,
+                escopo = EXCLUDED.escopo,
+                periodicidade_meses = EXCLUDED.periodicidade_meses,
+                exige_revisao_por_evento = EXCLUDED.exige_revisao_por_evento,
+                ativo = TRUE
+            """,
+            (codigo, nome, escopo, periodicidade_meses, exige_revisao),
         )
 
     if not coluna_existe("clientes", "cpf"):
@@ -860,7 +1025,7 @@ def criar_tabelas():
         conn.execute("ALTER TABLE convites_cadastro ADD COLUMN usuario_sugerido TEXT")
 
 
-RUN_DB_BOOTSTRAP = os.getenv("RUN_DB_BOOTSTRAP", "false").lower() == "true"
+RUN_DB_BOOTSTRAP = os.getenv("RUN_DB_BOOTSTRAP", "true").lower() == "true"
 if RUN_DB_BOOTSTRAP:
     criar_tabelas()
 
@@ -918,6 +1083,42 @@ def criar_sessao_login(
         (token, usuario, user_id, empresa_id, menu, perfil, agora()),
     )
     return token
+
+
+def classificar_status_vencimento(data_vencimento):
+    if not data_vencimento:
+        return "Vigente"
+
+    hoje = agora().date()
+    if hasattr(data_vencimento, "date"):
+        data_vencimento = data_vencimento.date()
+
+    dias = (data_vencimento - hoje).days
+
+    if dias < 0:
+        return "Vencido"
+    elif dias <= 30:
+        return "A vencer"
+    return "Vigente"
+
+
+def atualizar_status_documentos_sst_empresa(empresa_id):
+    conn.execute(
+        """
+        UPDATE documentos_sst
+        SET
+            status = CASE
+                WHEN revisao_necessaria = TRUE THEN 'Revisão necessária'
+                WHEN data_vencimento IS NULL THEN 'Vigente'
+                WHEN data_vencimento < CURRENT_DATE THEN 'Vencido'
+                WHEN data_vencimento <= CURRENT_DATE + INTERVAL '30 days' THEN 'A vencer'
+                ELSE 'Vigente'
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE empresa_id = %s
+        """,
+        (empresa_id,),
+    )
 
 
 def atualizar_menu_sessao(token, menu):
@@ -1131,6 +1332,44 @@ def obter_clientes_ativos():
     ).fetchall()
 
 
+@st.cache_data(ttl=60)
+def listar_tipos_documento_sst():
+    return conn.execute(
+        """
+        SELECT id, codigo, nome, escopo, periodicidade_meses, exige_revisao_por_evento
+        FROM tipos_documento_sst
+        WHERE ativo = TRUE
+        ORDER BY nome
+        """
+    ).fetchall()
+
+
+@st.cache_data(ttl=60)
+def listar_filiais_ativas(empresa_id):
+    return conn.execute(
+        """
+        SELECT id, nome
+        FROM filiais
+        WHERE empresa_id = %s AND ativo = TRUE
+        ORDER BY nome
+        """,
+        (empresa_id,),
+    ).fetchall()
+
+
+@st.cache_data(ttl=60)
+def listar_colaboradores_ativos(empresa_id):
+    return conn.execute(
+        """
+        SELECT id, nome
+        FROM colaboradores
+        WHERE empresa_id = %s AND ativo = TRUE
+        ORDER BY nome
+        """,
+        (empresa_id,),
+    ).fetchall()
+
+
 def obter_nome_cliente(usuario):
     row = conn.execute(
         "SELECT nome FROM clientes WHERE usuario = %s",
@@ -1216,6 +1455,14 @@ def render_anexos_como_arquivo(solicitacao_id, prefixo="anexo"):
                 key=f"{prefixo}_download_{anexo['id']}",
                 use_container_width=False,
             )
+
+
+def calcular_data_vencimento_documento(data_emissao, periodicidade_meses):
+    if not data_emissao or not periodicidade_meses:
+        return None
+    return (
+        pd.Timestamp(data_emissao) + pd.DateOffset(months=int(periodicidade_meses))
+    ).date()
 
 
 def obter_solicitacoes_filtradas(
@@ -1429,6 +1676,72 @@ def criar_convite(nome, email, empresa_id, tipo_usuario, observacao=""):
         "email_enviado": email_enviado,
         "email_msg": email_msg,
     }
+
+
+def calcular_vencimento_documento(data_emissao, periodicidade_meses):
+    if not data_emissao or not periodicidade_meses:
+        return None
+    return (
+        pd.Timestamp(data_emissao) + pd.DateOffset(months=int(periodicidade_meses))
+    ).date()
+
+
+def classificar_status_vencimento(data_vencimento, revisao_necessaria=False):
+    if revisao_necessaria:
+        return "Revisão necessária"
+
+    if not data_vencimento:
+        return "Vigente"
+
+    hoje = agora().date()
+    if hasattr(data_vencimento, "date"):
+        data_vencimento = data_vencimento.date()
+
+    dias = (data_vencimento - hoje).days
+
+    if dias < 0:
+        return "Vencido"
+    elif dias <= 30:
+        return "A vencer"
+    return "Vigente"
+
+
+def validar_upload_documento_sst(arquivo):
+    nome = (arquivo.name or "").lower()
+    ext = Path(nome).suffix.lower()
+    permitidos = {".pdf", ".png", ".jpg", ".jpeg"}
+
+    if ext not in permitidos:
+        return False, "Tipo de arquivo inválido. Envie PDF, PNG, JPG ou JPEG."
+
+    tamanho = len(arquivo.getvalue())
+    limite = MAX_UPLOAD_MB * 1024 * 1024
+
+    if tamanho > limite:
+        return False, f"O arquivo excede o limite de {MAX_UPLOAD_MB} MB."
+
+    return True, ""
+
+
+def registrar_evento_revisao_sst(
+    empresa_id, filial_id, tipo_evento, descricao, data_evento
+):
+    conn.execute(
+        """
+        INSERT INTO eventos_revisao_sst (
+            empresa_id, filial_id, tipo_evento, descricao, data_evento, created_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            empresa_id,
+            filial_id,
+            tipo_evento,
+            descricao.strip(),
+            data_evento,
+            agora(),
+        ),
+    )
 
 
 def reenviar_convite(convite_id):
@@ -1823,6 +2136,44 @@ def aplicar_estilo_login():
         """,
         unsafe_allow_html=True,
     )
+
+
+@st.cache_data(ttl=60)
+def listar_tipos_documento_sst():
+    return conn.execute(
+        """
+        SELECT id, codigo, nome, escopo, periodicidade_meses, exige_revisao_por_evento
+        FROM tipos_documento_sst
+        WHERE ativo = TRUE
+        ORDER BY nome
+    """
+    ).fetchall()
+
+
+@st.cache_data(ttl=60)
+def listar_filiais_ativas(empresa_id):
+    return conn.execute(
+        """
+        SELECT id, nome
+        FROM filiais
+        WHERE empresa_id = %s AND ativo = TRUE
+        ORDER BY nome
+    """,
+        (empresa_id,),
+    ).fetchall()
+
+
+@st.cache_data(ttl=60)
+def listar_colaboradores_ativos(empresa_id):
+    return conn.execute(
+        """
+        SELECT id, nome, matricula
+        FROM colaboradores
+        WHERE empresa_id = %s
+        ORDER BY nome
+    """,
+        (empresa_id,),
+    ).fetchall()
 
 
 def render_tela_convite(token_convite):
@@ -2332,17 +2683,27 @@ def aplicar_design_portal():
         """
         <style>
         .stApp {
-            background: linear-gradient(180deg, #020b16 0%, #04111f 100%);
+            background:
+                radial-gradient(circle at top left, rgba(58, 28, 113, 0.18), transparent 28%),
+                radial-gradient(circle at bottom right, rgba(46, 125, 255, 0.10), transparent 24%),
+                linear-gradient(135deg, #031427 0%, #06264A 55%, #0B2F57 100%);
             color: #EAF2FF;
         }
-        [data-testid="stHeader"] { background: transparent; }
+
+        [data-testid="stHeader"] {
+            background: transparent;
+        }
+
         .block-container {
-            padding-top: 1.15rem;
+            padding-top: 1.2rem;
             padding-bottom: 1.8rem;
             max-width: 1380px;
         }
         section[data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #03101d 0%, #051424 100%);
+            background: rgba(3, 16, 29, 0.75);
+            backdrop-filter: blur(6px);
+            border-right: 1px solid rgba(120,145,170,0.10);
+        };
             border-right: 1px solid rgba(120,145,170,0.12);
             min-width: 290px !important;
             max-width: 290px !important;
@@ -2387,6 +2748,16 @@ def aplicar_design_portal():
             padding-left: 10px !important;
             margin-bottom: 8px;
         }
+
+        .bv-card {
+            background: rgba(10, 34, 69, 0.75);
+            border: 1px solid rgba(170, 198, 236, 0.18);
+            border-radius: 20px;
+            padding: 20px 22px;
+            box-shadow: 0 16px 40px rgba(0,0,0,0.25);
+            backdrop-filter: blur(6px);
+            margin-bottom: 16px;
+        }
         .bv-sidebar-top { display:flex; align-items:center; gap:10px; margin:4px 0 18px 0; }
         .bv-sidebar-logo { width:34px; height:34px; flex-shrink:0; }
         .bv-sidebar-title { font-size:16px; font-weight:700; color:#F7FBFF; line-height:1.2; }
@@ -2425,11 +2796,17 @@ def render_sidebar_menu(menu_options, current_menu, logo_b64):
         "Cadastro de Filiais": "clientes",
         "Cadastro de Setores": "cadastros",
         "Cadastro de Cargos": "atendentes",
+        "Documentos SST": "cadastros",
+        "Vencimentos SST": "dashboard",
+        "Cadastro de Clientes": "clientes",
+        "Cadastro de Empresas": "clientes",
+        "Cadastro de Operadores": "atendentes",
+        "Painel de Cadastros": "cadastros",
     }
 
     if logo_b64:
         st.markdown(
-            f'<div class="bv-sidebar-top"><img class="bv-sidebar-logo" src="data:image/png;base64,{logo_b64}"><div class="bv-sidebar-title">Portal Arati</div></div>',
+            f'<div class="bv-sidebar-top"><img class="bv-sidebar-logo" src="data:image/png;base64,{logo_b64}"><div class="bv-sidebar-title">Gestão RH</div></div>',
             unsafe_allow_html=True,
         )
 
@@ -2475,7 +2852,7 @@ with header_logo_col:
 
 with header_title_col:
     st.markdown(
-        "<h1 style='margin-bottom:0;'>Portal Arati</h1>",
+        "<h1 style='margin-bottom:0;'>Gestão RH</h1>",
         unsafe_allow_html=True,
     )
 
@@ -2483,7 +2860,7 @@ st.markdown(
     "<hr style='border:1px solid rgba(120,145,170,0.12); margin-top:0;'>",
     unsafe_allow_html=True,
 )
-st.caption("Gestão de demandas e acompanhamento em tempo real")
+st.caption("Gestão de Recursos Humanos orientada por dados para empresas modernas.")
 
 menu_options_admin = [
     "Dashboard RH",
@@ -2492,6 +2869,8 @@ menu_options_admin = [
     "Cadastro de Filiais",
     "Cadastro de Setores",
     "Cadastro de Cargos",
+    "Documentos SST",
+    "Vencimentos SST",
 ]
 
 menu_options_gestor = [
@@ -2501,16 +2880,38 @@ menu_options_gestor = [
     "Cadastro de Filiais",
     "Cadastro de Setores",
     "Cadastro de Cargos",
+    "Documentos SST",
+    "Vencimentos SST",
 ]
 
 st.session_state.setdefault("menu_atual", "Dashboard RH")
 menu_options_usuario = ["Nova Solicitação", "Demandas Solicitadas"]
 
 perfil_atual = st.session_state.get("perfil")
-if perfil_atual == "admin":
-    menu_options = menu_options_admin
-elif perfil_atual == "gestor":
-    menu_options = menu_options_gestor
+is_global = perfil_atual in ("superadmin", "operador")
+
+menu_options_cliente = [
+    "Dashboard RH",
+    "Quadro de Funcionários",
+    "Cadastro de Colaboradores",
+    "Cadastro de Filiais",
+    "Cadastro de Setores",
+    "Cadastro de Cargos",
+    "Documentos SST",
+    "Vencimentos SST",
+]
+
+menu_options_global = menu_options_cliente + [
+    "Cadastro de Clientes",
+    "Cadastro de Empresas",
+    "Cadastro de Operadores",
+    "Painel de Cadastros",
+]
+
+if is_global:
+    menu_options = menu_options_global
+elif perfil_atual in ("admin", "gestor"):
+    menu_options = menu_options_cliente
 else:
     menu_options = menu_options_usuario
 
@@ -2526,7 +2927,55 @@ atualizar_menu_sessao(st.session_state.get("token_sessao"), menu)
 persistir_query_params()
 
 with st.sidebar:
-    render_sidebar_menu(menu_options=menu_options, current_menu=menu, logo_b64=logo_b64)
+    empresa_id_contexto = None
+
+    if is_global:
+        empresas = conn.execute(
+            """
+            SELECT
+                id,
+                COALESCE(fantasia, razao_social, 'Empresa sem nome') AS nome
+            FROM empresas
+            WHERE ativo = TRUE
+            ORDER BY COALESCE(fantasia, razao_social, 'Empresa sem nome')
+            """
+        ).fetchall()
+
+        if empresas:
+            empresa_labels = [e["nome"] for e in empresas]
+
+            empresa_nome_padrao = st.session_state.get("empresa_nome_contexto")
+            if empresa_nome_padrao not in empresa_labels:
+                empresa_nome_padrao = empresa_labels[0]
+
+            empresa_nome_sel = st.selectbox(
+                "Empresa",
+                empresa_labels,
+                index=empresa_labels.index(empresa_nome_padrao),
+                key="empresa_global_filtro",
+            )
+
+            empresa_selecionada = next(
+                e for e in empresas if e["nome"] == empresa_nome_sel
+            )
+            empresa_id_contexto = empresa_selecionada["id"]
+            st.session_state["empresa_nome_contexto"] = empresa_nome_sel
+        else:
+            st.warning("Nenhuma empresa ativa encontrada.")
+    else:
+        empresa_id_contexto = st.session_state.get("empresa_id")
+        st.session_state["empresa_nome_contexto"] = (
+            st.session_state.get("empresa_nome") or ""
+        )
+
+    st.session_state["empresa_id_contexto"] = empresa_id_contexto
+
+    render_sidebar_menu(
+        menu_options=menu_options,
+        current_menu=menu,
+        logo_b64=logo_b64,
+    )
+
     st.markdown('<div style="flex:1;"></div>', unsafe_allow_html=True)
     st.markdown('<div class="bv-sidebar-divider"></div>', unsafe_allow_html=True)
 
@@ -2535,6 +2984,7 @@ with st.sidebar:
         .replace("_", " ")
         .strip()
     )
+
     partes_nome_usuario = [p for p in nome_usuario.split() if p]
     if len(partes_nome_usuario) >= 2:
         iniciais = (partes_nome_usuario[0][0] + partes_nome_usuario[1][0]).upper()
@@ -2555,6 +3005,9 @@ with st.sidebar:
         """,
         unsafe_allow_html=True,
     )
+
+    if is_global and st.session_state.get("empresa_nome_contexto"):
+        st.caption(f"Empresa em contexto: {st.session_state['empresa_nome_contexto']}")
 
     col_swap_i, col_swap_b = st.columns([0.18, 0.82], vertical_alignment="center")
     with col_swap_i:
@@ -3165,11 +3618,11 @@ elif menu == "Demandas Solicitadas":
         st.info("Nenhuma solicitação encontrada com os filtros aplicados.")
 
 
-elif menu == "Dashboard RH" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
-    exigir_perfil("superadmin", "operador", "admin", "gestor")
+elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
+    exigir_perfil("admin", "gestor")
     st.header("Painel RH")
 
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
 
     dados = conn.execute(
         """
@@ -3289,6 +3742,26 @@ elif menu == "Dashboard RH" and perfil_atual in ("superadmin", "operador", "admi
         c5.metric("Turnover", f"{turnover:.2f}%")
         c6.metric("Afastados", afastados_total)
 
+        atualizar_status_documentos_sst_empresa(empresa_id)
+        docs_sst = conn.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'Vencido') AS vencidos,
+                COUNT(*) FILTER (WHERE status = 'A vencer') AS a_vencer,
+                COUNT(*) FILTER (WHERE status = 'Revisão necessária') AS revisao_necessaria
+            FROM documentos_sst
+            WHERE empresa_id = %s
+            """,
+            (empresa_id,),
+        ).fetchone()
+
+        d1, d2, d3 = st.columns(3)
+        d1.metric("SST vencidos", int((docs_sst or {}).get("vencidos") or 0))
+        d2.metric("SST a vencer (30 dias)", int((docs_sst or {}).get("a_vencer") or 0))
+        d3.metric(
+            "SST em revisão", int((docs_sst or {}).get("revisao_necessaria") or 0)
+        )
+
         st.markdown("---")
 
         st.subheader("Resumo do quadro")
@@ -3346,11 +3819,261 @@ elif menu == "Dashboard RH" and perfil_atual in ("superadmin", "operador", "admi
             st.dataframe(
                 tabela_aniversariantes, use_container_width=True, hide_index=True
             )
+elif menu == "Cadastro de Empresas" and perfil_atual in ("superadmin", "operador"):
+    st.header("Cadastro de Empresas")
+    st.caption("Gestão global das empresas da plataforma.")
 
-elif menu == "Cadastro de Filiais" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
-    exigir_perfil("superadmin", "operador", "admin", "gestor")
+    with st.expander("Nova empresa", expanded=True):
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            razao_social = st.text_input("Razão Social", key="empresa_razao_social")
+            fantasia = st.text_input("Nome Fantasia", key="empresa_fantasia")
+            cnpj = st.text_input("CNPJ", key="empresa_cnpj")
+
+        with c2:
+            cep = st.text_input("CEP", key="empresa_cep")
+            logradouro = st.text_input("Logradouro", key="empresa_logradouro")
+            numero = st.text_input("Número", key="empresa_numero")
+
+        with c3:
+            bairro = st.text_input("Bairro", key="empresa_bairro")
+            cidade = st.text_input("Cidade", key="empresa_cidade")
+            ativo_empresa = st.checkbox("Ativa", value=True, key="empresa_ativa")
+
+        if st.button("Cadastrar Empresa", key="btn_cadastrar_empresa"):
+            if not razao_social.strip() and not fantasia.strip():
+                st.error("Informe ao menos a razão social ou o nome fantasia.")
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO empresas
+                    (cnpj, razao_social, fantasia, cep, logradouro, numero, bairro, cidade, ativo)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        formatar_cnpj(cnpj.strip()),
+                        razao_social.strip(),
+                        fantasia.strip(),
+                        cep.strip(),
+                        logradouro.strip(),
+                        numero.strip(),
+                        bairro.strip(),
+                        cidade.strip(),
+                        ativo_empresa,
+                    ),
+                )
+                st.success("Empresa cadastrada com sucesso.")
+                st.rerun()
+
+    st.markdown("---")
+    st.subheader("Empresas cadastradas")
+
+    if "empresa_editando_id" not in st.session_state:
+        st.session_state.empresa_editando_id = None
+
+    empresas = conn.execute(
+        """
+        SELECT id, cnpj, razao_social, fantasia, cidade, ativo
+        FROM empresas
+        ORDER BY COALESCE(fantasia, razao_social, 'Empresa sem nome')
+        """
+    ).fetchall()
+
+    if empresas:
+        empresas, _, _ = paginar_registros(
+            empresas,
+            "pagina_empresas_cadastro",
+            page_size=10,
+        )
+
+        for empresa in empresas:
+            empresa_id_item = empresa["id"]
+
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([3.2, 1.2, 3])
+
+                with c1:
+                    st.write(
+                        f"**ID {empresa['id']} - {empresa['fantasia'] or empresa['razao_social'] or 'Empresa sem nome'}**"
+                    )
+                    st.caption(empresa["razao_social"] or "Sem razão social")
+                    st.caption(empresa["cnpj"] or "Sem CNPJ")
+
+                with c2:
+                    st.write("Ativa" if bool(empresa["ativo"]) else "Inativa")
+                    st.caption(empresa["cidade"] or "Sem cidade")
+
+                with c3:
+                    b1, b2, b3 = st.columns(3)
+
+                    with b1:
+                        if bool(empresa["ativo"]):
+                            if st.button(
+                                "Inativar",
+                                key=f"inativar_empresa_{empresa_id_item}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE empresas SET ativo = FALSE WHERE id = %s",
+                                    (empresa_id_item,),
+                                )
+                                st.rerun()
+                        else:
+                            if st.button(
+                                "Ativar",
+                                key=f"ativar_empresa_{empresa_id_item}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE empresas SET ativo = TRUE WHERE id = %s",
+                                    (empresa_id_item,),
+                                )
+                                st.rerun()
+
+                    with b2:
+                        if st.button(
+                            "Excluir",
+                            key=f"excluir_empresa_{empresa_id_item}",
+                            use_container_width=True,
+                        ):
+                            possui_usuarios = conn.execute(
+                                "SELECT 1 FROM usuarios WHERE empresa_id = %s LIMIT 1",
+                                (empresa_id_item,),
+                            ).fetchone()
+
+                            if possui_usuarios:
+                                st.warning(
+                                    "Esta empresa possui usuários vinculados. Inative ao invés de excluir."
+                                )
+                            else:
+                                conn.execute(
+                                    "DELETE FROM empresas WHERE id = %s",
+                                    (empresa_id_item,),
+                                )
+                                st.success("Empresa excluída.")
+                                st.rerun()
+
+                    with b3:
+                        if st.button(
+                            "Alterar",
+                            key=f"alterar_empresa_{empresa_id_item}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.empresa_editando_id = empresa_id_item
+                            st.rerun()
+
+                if st.session_state.empresa_editando_id == empresa_id_item:
+                    empresa_full = conn.execute(
+                        """
+                        SELECT id, cnpj, razao_social, fantasia, cep, logradouro, numero, bairro, cidade
+                        FROM empresas
+                        WHERE id = %s
+                        """,
+                        (empresa_id_item,),
+                    ).fetchone()
+
+                    e1, e2, e3 = st.columns(3)
+
+                    with e1:
+                        novo_cnpj = st.text_input(
+                            "CNPJ",
+                            value=empresa_full["cnpj"] or "",
+                            key=f"edit_empresa_cnpj_{empresa_id_item}",
+                        )
+                        nova_razao = st.text_input(
+                            "Razão Social",
+                            value=empresa_full["razao_social"] or "",
+                            key=f"edit_empresa_razao_{empresa_id_item}",
+                        )
+                        nova_fantasia = st.text_input(
+                            "Nome Fantasia",
+                            value=empresa_full["fantasia"] or "",
+                            key=f"edit_empresa_fantasia_{empresa_id_item}",
+                        )
+
+                    with e2:
+                        novo_cep = st.text_input(
+                            "CEP",
+                            value=empresa_full["cep"] or "",
+                            key=f"edit_empresa_cep_{empresa_id_item}",
+                        )
+                        novo_logradouro = st.text_input(
+                            "Logradouro",
+                            value=empresa_full["logradouro"] or "",
+                            key=f"edit_empresa_logradouro_{empresa_id_item}",
+                        )
+                        novo_numero = st.text_input(
+                            "Número",
+                            value=empresa_full["numero"] or "",
+                            key=f"edit_empresa_numero_{empresa_id_item}",
+                        )
+
+                    with e3:
+                        novo_bairro = st.text_input(
+                            "Bairro",
+                            value=empresa_full["bairro"] or "",
+                            key=f"edit_empresa_bairro_{empresa_id_item}",
+                        )
+                        nova_cidade = st.text_input(
+                            "Cidade",
+                            value=empresa_full["cidade"] or "",
+                            key=f"edit_empresa_cidade_{empresa_id_item}",
+                        )
+
+                    a1, a2 = st.columns(2)
+
+                    with a1:
+                        if st.button(
+                            "Salvar alteração",
+                            key=f"salvar_empresa_{empresa_id_item}",
+                            use_container_width=True,
+                        ):
+                            conn.execute(
+                                """
+                                UPDATE empresas
+                                SET cnpj = %s,
+                                    razao_social = %s,
+                                    fantasia = %s,
+                                    cep = %s,
+                                    logradouro = %s,
+                                    numero = %s,
+                                    bairro = %s,
+                                    cidade = %s
+                                WHERE id = %s
+                                """,
+                                (
+                                    formatar_cnpj(novo_cnpj.strip()),
+                                    nova_razao.strip(),
+                                    nova_fantasia.strip(),
+                                    novo_cep.strip(),
+                                    novo_logradouro.strip(),
+                                    novo_numero.strip(),
+                                    novo_bairro.strip(),
+                                    nova_cidade.strip(),
+                                    empresa_id_item,
+                                ),
+                            )
+                            st.session_state.empresa_editando_id = None
+                            st.success("Empresa atualizada com sucesso.")
+                            st.rerun()
+
+                    with a2:
+                        if st.button(
+                            "Cancelar alteração",
+                            key=f"cancelar_empresa_{empresa_id_item}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.empresa_editando_id = None
+                            st.rerun()
+    else:
+        st.info("Nenhuma empresa cadastrada ainda.")
+
+
+elif menu == "Cadastro de Filiais" and perfil_atual in ("admin", "gestor"):
+    exigir_perfil("admin", "gestor")
     st.header("Cadastro de Filiais")
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
 
     with st.expander("Nova filial", expanded=True):
         c1, c2, c3 = st.columns(3)
@@ -3535,10 +4258,11 @@ elif menu == "Cadastro de Filiais" and perfil_atual in ("superadmin", "operador"
     else:
         st.info("Nenhuma filial cadastrada ainda.")
 
-elif menu == "Cadastro de Colaboradores" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
-    exigir_perfil("superadmin", "operador", "admin", "gestor")
+
+elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor"):
+    exigir_perfil("admin", "gestor")
     st.header("Cadastro de Colaboradores")
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
 
     filiais = conn.execute(
         "SELECT id, nome FROM filiais WHERE empresa_id = %s AND ativo = TRUE ORDER BY nome",
@@ -4018,10 +4742,10 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("superadmin", "ope
     else:
         st.info("Nenhum colaborador cadastrado ainda.")
 
-elif menu == "Cadastro de Setores" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
-    exigir_perfil("superadmin", "operador", "admin", "gestor")
+elif menu == "Cadastro de Setores" and perfil_atual in ("admin", "gestor"):
+    exigir_perfil("admin", "gestor")
     st.header("Cadastro de Setores")
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
 
     with st.expander("Novo setor", expanded=True):
         nome_setor = st.text_input("Nome do Setor", key="setor_nome")
@@ -4146,10 +4870,10 @@ elif menu == "Cadastro de Setores" and perfil_atual in ("superadmin", "operador"
     else:
         st.info("Nenhum setor cadastrado ainda.")
 
-elif menu == "Cadastro de Cargos" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
-    exigir_perfil("superadmin", "operador", "admin", "gestor")
+elif menu == "Cadastro de Cargos" and perfil_atual in ("admin", "gestor"):
+    exigir_perfil("admin", "gestor")
     st.header("Cadastro de Cargos")
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
 
     with st.expander("Novo cargo", expanded=True):
         nome_cargo = st.text_input("Nome do Cargo", key="cargo_nome")
@@ -4273,11 +4997,339 @@ elif menu == "Cadastro de Cargos" and perfil_atual in ("superadmin", "operador",
     else:
         st.info("Nenhum cargo cadastrado ainda.")
 
-elif menu == "Quadro de Funcionários" and perfil_atual in ("superadmin", "operador", "admin", "gestor"):
-    exigir_perfil("superadmin", "operador", "admin", "gestor")
-    st.header("Quadro de Funcionários")
-    empresa_id = get_empresa_id()
+elif menu == "Cadastro de Clientes" and perfil_atual in ("superadmin", "operador"):
+    st.header("Cadastro de Clientes")
+    st.caption("Gestão global dos clientes vinculados às empresas.")
 
+    empresas = conn.execute(
+        """
+        SELECT id, COALESCE(fantasia, razao_social, 'Empresa sem nome') AS nome
+        FROM empresas
+        WHERE ativo = TRUE
+        ORDER BY COALESCE(fantasia, razao_social, 'Empresa sem nome')
+        """
+    ).fetchall()
+
+    empresa_id_filtro = None
+    if empresas:
+        empresa_labels = ["Todas"] + [e["nome"] for e in empresas]
+        empresa_nome_filtro = st.selectbox(
+            "Filtrar por empresa",
+            empresa_labels,
+            key="clientes_empresa_filtro",
+        )
+
+        if empresa_nome_filtro != "Todas":
+            empresa_id_filtro = next(
+                e["id"] for e in empresas if e["nome"] == empresa_nome_filtro
+            )
+
+    with st.expander("Novo cliente", expanded=True):
+        c1, c2, c3 = st.columns(3)
+
+        empresa_id_cliente = None
+        with c1:
+            nome_cliente = st.text_input("Nome", key="cliente_nome")
+            usuario_cliente = st.text_input("Usuário", key="cliente_usuario")
+            email_cliente = st.text_input("E-mail", key="cliente_email")
+
+        with c2:
+            cpf_cliente = st.text_input("CPF", key="cliente_cpf")
+            funcao_cliente = st.text_input("Função", key="cliente_funcao")
+            senha_cliente = st.text_input("Senha", type="password", key="cliente_senha")
+
+        with c3:
+            ativo_cliente = st.checkbox("Ativo", value=True, key="cliente_ativo")
+
+            if empresas:
+                empresa_nome_cliente = st.selectbox(
+                    "Empresa",
+                    [e["nome"] for e in empresas],
+                    key="cliente_empresa",
+                )
+                empresa_id_cliente = next(
+                    e["id"] for e in empresas if e["nome"] == empresa_nome_cliente
+                )
+            else:
+                st.warning("Cadastre ao menos uma empresa ativa.")
+
+        if st.button("Cadastrar Cliente", key="btn_cadastrar_cliente"):
+            if not nome_cliente.strip() or not usuario_cliente.strip():
+                st.error("Preencha nome e usuário.")
+            elif not empresa_id_cliente:
+                st.error("Selecione a empresa.")
+            else:
+                existe = conn.execute(
+                    "SELECT 1 FROM clientes WHERE usuario = %s LIMIT 1",
+                    (usuario_cliente.strip(),),
+                ).fetchone()
+
+                if existe:
+                    st.error("Já existe um cliente com esse usuário.")
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO clientes
+                        (usuario, senha, nome, ativo, cpf, empresa_id, funcao, email)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            usuario_cliente.strip(),
+                            (
+                                gerar_hash_senha(senha_cliente.strip())
+                                if senha_cliente.strip()
+                                else ""
+                            ),
+                            nome_cliente.strip(),
+                            ativo_cliente,
+                            formatar_cpf(cpf_cliente.strip()),
+                            empresa_id_cliente,
+                            funcao_cliente.strip(),
+                            email_cliente.strip().lower(),
+                        ),
+                    )
+                    st.success("Cliente cadastrado com sucesso.")
+                    st.rerun()
+
+    st.markdown("---")
+    st.subheader("Clientes cadastrados")
+
+    filtros = []
+    params = []
+
+    if empresa_id_filtro:
+        filtros.append("c.empresa_id = %s")
+        params.append(empresa_id_filtro)
+
+    where_clause = " AND ".join(filtros) if filtros else "TRUE"
+
+    clientes = conn.execute(
+        f"""
+        SELECT
+            c.id,
+            c.nome,
+            c.usuario,
+            c.email,
+            c.funcao,
+            c.ativo,
+            e.fantasia AS empresa_nome
+        FROM clientes c
+        LEFT JOIN empresas e ON e.id = c.empresa_id
+        WHERE {where_clause}
+        ORDER BY c.nome, c.usuario
+        """,
+        params,
+    ).fetchall()
+
+    if clientes:
+        clientes, _, _ = paginar_registros(
+            clientes,
+            "pagina_clientes_cadastro_global",
+            page_size=10,
+        )
+
+        for cliente in clientes:
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([2.4, 2.2, 2.8])
+
+                with c1:
+                    st.write(f"**{cliente['nome'] or cliente['usuario']}**")
+                    st.caption(cliente["usuario"])
+
+                with c2:
+                    st.write(cliente["empresa_nome"] or "Sem empresa")
+                    st.caption(cliente["funcao"] or "Sem função")
+
+                with c3:
+                    st.write(cliente["email"] or "Sem e-mail")
+                    st.caption("Ativo" if bool(cliente["ativo"]) else "Inativo")
+    else:
+        st.info("Nenhum cliente cadastrado ainda.")
+
+elif menu == "Painel de Cadastros" and perfil_atual in ("superadmin", "operador"):
+    st.header("Painel de Cadastros")
+    st.caption("Convites e pré-cadastros globais da plataforma.")
+
+    tab1, tab2, tab3 = st.tabs(["Novo convite", "Pendentes / enviados", "Concluídos"])
+
+    with tab1:
+        empresas = conn.execute(
+            """
+            SELECT id, COALESCE(fantasia, razao_social, 'Empresa sem nome') AS nome
+            FROM empresas
+            WHERE ativo = TRUE
+            ORDER BY COALESCE(fantasia, razao_social, 'Empresa sem nome')
+            """
+        ).fetchall()
+
+        nome_convite = st.text_input("Nome", key="convite_nome_global")
+        email_convite = st.text_input("E-mail", key="convite_email_global")
+        tipo_convite = st.selectbox(
+            "Perfil do usuário",
+            ["admin", "gestor", "usuario"],
+            key="convite_tipo_global",
+        )
+        obs_convite = st.text_area("Observação", key="convite_obs_global")
+
+        empresa_id_convite = None
+        if empresas:
+            empresa_nome = st.selectbox(
+                "Empresa",
+                [row["nome"] for row in empresas],
+                key="convite_empresa_global",
+            )
+            empresa_id_convite = next(
+                row["id"] for row in empresas if row["nome"] == empresa_nome
+            )
+        else:
+            st.warning("Cadastre ao menos uma empresa ativa.")
+
+        if st.button("Gerar convite e link", key="criar_convite_btn_global"):
+            if not nome_convite.strip() or not email_convite.strip():
+                st.error("Preencha nome e e-mail.")
+            elif not empresa_id_convite:
+                st.error("Selecione a empresa.")
+            else:
+                resultado_convite = criar_convite(
+                    nome=nome_convite,
+                    email=email_convite,
+                    empresa_id=empresa_id_convite,
+                    tipo_usuario=tipo_convite,
+                    observacao=obs_convite,
+                )
+
+                link = resultado_convite["link"]
+
+                if resultado_convite["email_enviado"]:
+                    st.success("Convite criado e enviado por e-mail com sucesso.")
+                else:
+                    st.warning(
+                        f"Convite criado, mas o e-mail não foi enviado. Motivo: {resultado_convite['email_msg']}"
+                    )
+
+                st.code(link, language="text")
+                st.session_state["ultimo_link_convite_global"] = link
+
+        ultimo_link = st.session_state.get("ultimo_link_convite_global")
+        if ultimo_link:
+            st.caption("Último link gerado")
+            st.code(ultimo_link, language="text")
+
+    with tab2:
+        convites = conn.execute(
+            """
+            SELECT
+                c.*,
+                e.fantasia AS empresa_nome
+            FROM convites_cadastro c
+            LEFT JOIN empresas e ON e.id = c.empresa_id
+            WHERE c.status IN ('pendente', 'enviado', 'expirado')
+            ORDER BY c.created_at DESC
+            """
+        ).fetchall()
+
+        if not convites:
+            st.info("Nenhum convite pendente/enviado.")
+        else:
+            for convite in convites:
+                link = montar_url_convite(convite["token"])
+
+                with st.container(border=True):
+                    c1, c2, c3, c4 = st.columns([2.4, 1.6, 1.4, 3.2])
+
+                    with c1:
+                        st.write(f"**{convite['nome']}**")
+                        st.caption(convite["email"])
+
+                    with c2:
+                        st.write(convite["tipo_usuario"].capitalize())
+                        st.caption(convite.get("empresa_nome") or "Sem empresa")
+
+                    with c3:
+                        st.write(convite["status"].capitalize())
+                        exp = (
+                            convite["expiracao_em"].strftime("%d/%m/%Y %H:%M")
+                            if convite["expiracao_em"]
+                            else "-"
+                        )
+                        st.caption(f"Expira em {exp}")
+
+                    with c4:
+                        a1, a2, a3 = st.columns(3)
+
+                        with a1:
+                            if st.button(
+                                "Reenviar",
+                                key=f"reenviar_convite_global_{convite['id']}",
+                                use_container_width=True,
+                            ):
+                                resultado_reenvio = reenviar_convite(convite["id"])
+                                st.session_state[
+                                    f"link_convite_global_{convite['id']}"
+                                ] = resultado_reenvio["link"]
+                                if resultado_reenvio["email_enviado"]:
+                                    st.success(
+                                        "Convite reenviado por e-mail com novo link."
+                                    )
+                                else:
+                                    st.warning(
+                                        f"Convite renovado, mas o e-mail não foi enviado. Motivo: {resultado_reenvio['email_msg']}"
+                                    )
+                                st.rerun()
+
+                        with a2:
+                            if st.button(
+                                "Cancelar",
+                                key=f"cancelar_convite_global_{convite['id']}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE convites_cadastro SET status = 'cancelado' WHERE id = %s",
+                                    (convite["id"],),
+                                )
+                                st.success("Convite cancelado.")
+                                st.rerun()
+
+                        with a3:
+                            st.code(
+                                st.session_state.get(
+                                    f"link_convite_global_{convite['id']}",
+                                    link,
+                                ),
+                                language="text",
+                            )
+
+    with tab3:
+        concluidos = conn.execute(
+            """
+            SELECT
+                c.*,
+                e.fantasia AS empresa_nome
+            FROM convites_cadastro c
+            LEFT JOIN empresas e ON e.id = c.empresa_id
+            WHERE c.status = 'concluido'
+            ORDER BY c.utilizado_em DESC NULLS LAST, c.created_at DESC
+            """
+        ).fetchall()
+
+        if not concluidos:
+            st.info("Nenhum cadastro concluído ainda.")
+        else:
+            for convite in concluidos:
+                with st.container(border=True):
+                    st.write(f"**{convite['nome']}** • {convite['email']}")
+                    st.caption(
+                        f"Perfil: {convite['tipo_usuario'].capitalize()} • "
+                        f"Empresa: {convite.get('empresa_nome') or 'Sem empresa'} • "
+                        f"Concluído em: {convite['utilizado_em'].strftime('%d/%m/%Y %H:%M') if convite['utilizado_em'] else '-'}"
+                    )
+
+
+elif menu == "Quadro de Funcionários" and perfil_atual in ("admin", "gestor"):
+    exigir_perfil("admin", "gestor")
+    st.header("Quadro de Funcionários")
+    empresa_id = get_empresa_contexto()
+    ###############
     dados = conn.execute(
         """
         SELECT
@@ -4343,36 +5395,532 @@ elif menu == "Quadro de Funcionários" and perfil_atual in ("superadmin", "opera
             use_container_width=True,
         )
 
-elif menu == "Cadastro de Atendentes" and perfil_atual == "admin":
-    st.header("Cadastro de Atendentes")
 
-    with st.expander("Novo atendente", expanded=True):
-        nome_atendente = st.text_input("Nome do atendente")
-        usuario_atendente = st.text_input(
-            "Usuário do atendente",
-            value=gerar_usuario(nome_atendente) if nome_atendente.strip() else "",
-            key="novo_atendente_usuario",
-        )
-        email_atendente = st.text_input("E-mail", key="novo_atendente_email")
-        senha_atendente = st.text_input(
-            "Senha", type="password", key="novo_atendente_senha"
-        )
-        ativo_atendente = st.checkbox("Ativo", value=True, key="novo_atendente_ativo")
+elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
+    exigir_perfil("admin", "gestor")
+    st.header("Documentos SST")
+    empresa_id = get_empresa_contexto()
+    # atualizar_status_documentos_sst_empresa(empresa_id)
 
-        if st.button("Cadastrar Atendente"):
+    t0 = time.perf_counter()
+    tipos_documento = listar_tipos_documento_sst()
+    t1 = time.perf_counter()
+
+    mapa_tipos = {row["nome"]: row for row in tipos_documento}
+
+    filiais = listar_filiais_ativas(empresa_id)
+    t2 = time.perf_counter()
+
+    colaboradores = listar_colaboradores_ativos(empresa_id)
+    t3 = time.perf_counter()
+
+    st.caption(
+        f"Tipos: {t1-t0:.3f}s | Filiais: {t2-t1:.3f}s | Colaboradores: {t3-t2:.3f}s"
+    )
+
+    with st.expander("Novo documento", expanded=True):
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            tipo_nome = st.selectbox(
+                "Tipo de documento",
+                list(mapa_tipos.keys()) if mapa_tipos else [],
+                key="sst_tipo_documento",
+            )
+            titulo_documento = st.text_input("Título", key="sst_titulo")
+            data_emissao = st.date_input(
+                "Data de emissão",
+                key="sst_data_emissao",
+                value=datetime.now().date(),
+            )
+
+        tipo_selecionado = mapa_tipos.get(tipo_nome) if mapa_tipos else None
+        periodicidade = (
+            tipo_selecionado["periodicidade_meses"] if tipo_selecionado else None
+        )
+        escopo_tipo = tipo_selecionado["escopo"] if tipo_selecionado else "empresa"
+        data_vencimento_calculada = calcular_data_vencimento_documento(
+            data_emissao,
+            periodicidade,
+        )
+        colaborador_id_sel = None
+
+        with c2:
+            filial_labels = ["Empresa / Geral"] + [row["nome"] for row in filiais]
+            filial_nome_sel = st.selectbox(
+                "Filial",
+                filial_labels,
+                key="sst_filial",
+            )
+            filial_id_sel = None
+            if filial_nome_sel != "Empresa / Geral":
+                filial_id_sel = next(
+                    row["id"] for row in filiais if row["nome"] == filial_nome_sel
+                )
+
+            colaborador_id_sel = None
+            if escopo_tipo == "colaborador":
+                colab_labels = [
+                    f"{row['nome']} ({row['matricula'] or 'Sem matrícula'})"
+                    for row in colaboradores
+                ]
+                if colab_labels:
+                    colab_sel = st.selectbox(
+                        "Colaborador",
+                        colab_labels,
+                        key="sst_colaborador",
+                    )
+                    colaborador_id_sel = colaboradores[colab_labels.index(colab_sel)][
+                        "id"
+                    ]
+                else:
+                    st.warning(
+                        "Cadastre colaboradores para usar documentos com escopo de colaborador."
+                    )
+            else:
+                st.text_input(
+                    "Colaborador",
+                    value="Não aplicável para este tipo",
+                    disabled=True,
+                    key="sst_colaborador_info",
+                )
+
+        with c3:
+            st.text_input(
+                "Periodicidade",
+                value=(
+                    f"{periodicidade} meses"
+                    if periodicidade
+                    else "Sem vencimento automático"
+                ),
+                disabled=True,
+                key="sst_periodicidade_info",
+            )
+            st.text_input(
+                "Vencimento calculado",
+                value=(
+                    data_vencimento_calculada.strftime("%d/%m/%Y")
+                    if data_vencimento_calculada
+                    else "Não calculado"
+                ),
+                disabled=True,
+                key="sst_vencimento_calculado",
+            )
+            revisao_manual = st.checkbox(
+                "Marcar revisão necessária",
+                value=False,
+                key="sst_revisao_manual",
+            )
+
+        observacao = st.text_area("Observação", key="sst_observacao")
+        arquivo_sst = st.file_uploader(
+            "Anexar documento",
+            type=["pdf", "png", "jpg", "jpeg"],
+            key="sst_arquivo",
+        )
+
+        if st.button("Cadastrar documento SST", key="btn_cadastrar_documento_sst"):
+            if not tipo_selecionado:
+                st.error("Selecione o tipo de documento.")
+            elif not titulo_documento.strip():
+                st.error("Informe o título do documento.")
+            elif escopo_tipo == "colaborador" and not colaborador_id_sel:
+                st.error("Selecione o colaborador para este documento.")
+            else:
+                arquivo_nome = None
+                arquivo_bytes = None
+
+                if arquivo_sst is not None:
+                    ok, msg = validar_upload_documento_sst(arquivo_sst)
+                    if not ok:
+                        st.error(msg)
+                        st.stop()
+                    arquivo_nome = arquivo_sst.name
+                    arquivo_bytes = arquivo_sst.getvalue()
+
+                status_documento = classificar_status_vencimento(
+                    data_vencimento_calculada,
+                    revisao_manual,
+                )
+
+                conn.execute(
+                    """
+                    INSERT INTO documentos_sst
+                    (
+                        empresa_id,
+                        filial_id,
+                        colaborador_id,
+                        tipo_documento_id,
+                        titulo,
+                        data_emissao,
+                        data_vencimento,
+                        status,
+                        observacao,
+                        arquivo_nome,
+                        arquivo,
+                        revisao_necessaria,
+                        criado_por,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        empresa_id,
+                        filial_id_sel,
+                        colaborador_id_sel,
+                        tipo_selecionado["id"],
+                        titulo_documento.strip(),
+                        data_emissao,
+                        data_vencimento_calculada,
+                        status_documento,
+                        observacao.strip(),
+                        arquivo_nome,
+                        arquivo_bytes,
+                        revisao_manual,
+                        get_user_id(),
+                        agora(),
+                        agora(),
+                    ),
+                )
+                # ✅ LIMPA CACHE AQUI
+                listar_documentos_sst_resumo.clear()
+                listar_tipos_documento_sst.clear()
+                listar_filiais_ativas.clear()
+                listar_colaboradores_ativos.clear()
+
+                st.success("Documento SST cadastrado com sucesso.")
+                st.rerun()
+
+    st.markdown("---")
+    st.subheader("Eventos que exigem revisão")
+    with st.expander("Registrar evento de revisão", expanded=False):
+        ev1, ev2, ev3 = st.columns(3)
+        with ev1:
+            tipo_evento = st.selectbox(
+                "Tipo de evento",
+                ["mudança_layout", "nova_atividade", "mudança_processo"],
+                key="sst_tipo_evento",
+            )
+        with ev2:
+            filial_evento_labels = ["Empresa / Geral"] + [
+                row["nome"] for row in filiais
+            ]
+            filial_evento_nome = st.selectbox(
+                "Filial do evento",
+                filial_evento_labels,
+                key="sst_evento_filial",
+            )
+        with ev3:
+            data_evento = st.date_input(
+                "Data do evento",
+                key="sst_evento_data",
+                value=datetime.now().date(),
+            )
+
+        descricao_evento = st.text_area(
+            "Descrição do evento", key="sst_evento_descricao"
+        )
+
+        if st.button("Registrar evento", key="btn_registrar_evento_sst"):
+            filial_evento_id = None
+            if filial_evento_nome != "Empresa / Geral":
+                filial_evento_id = next(
+                    row["id"] for row in filiais if row["nome"] == filial_evento_nome
+                )
+
+            if not descricao_evento.strip():
+                st.error("Descreva o evento.")
+            else:
+                registrar_evento_revisao_sst(
+                    empresa_id=empresa_id,
+                    filial_id=filial_evento_id,
+                    tipo_evento=tipo_evento,
+                    descricao=descricao_evento,
+                    data_evento=data_evento,
+                )
+
+                conn.execute(
+                    """
+                    UPDATE documentos_sst d
+                    SET revisao_necessaria = TRUE,
+                        status = 'Revisão necessária',
+                        updated_at = %s
+                    FROM tipos_documento_sst t
+                    WHERE d.tipo_documento_id = t.id
+                      AND d.empresa_id = %s
+                      AND t.exige_revisao_por_evento = TRUE
+                      AND (%s IS NULL OR d.filial_id = %s OR d.filial_id IS NULL)
+                    """,
+                    (agora(), empresa_id, filial_evento_id, filial_evento_id),
+                )
+
+                st.success(
+                    "Evento registrado e documentos elegíveis marcados para revisão."
+                )
+                st.rerun()
+
+    st.markdown("---")
+    st.subheader("Documentos cadastrados")
+
+    filtro1, filtro2, filtro3 = st.columns(3)
+    with filtro1:
+        filtro_status_sst = st.selectbox(
+            "Status",
+            [
+                "Todos",
+                "Vigente",
+                "A vencer",
+                "Vencido",
+                "Revisão necessária",
+                "Sem vencimento",
+            ],
+            key="filtro_status_sst",
+        )
+    with filtro2:
+        filtro_tipo_sst = st.selectbox(
+            "Tipo",
+            ["Todos"] + list(mapa_tipos.keys()),
+            key="filtro_tipo_sst",
+        )
+    with filtro3:
+        filtro_filial_sst = st.selectbox(
+            "Filial",
+            ["Todas"] + [row["nome"] for row in filiais],
+            key="filtro_filial_sst",
+        )
+
+    documentos = conn.execute(
+        """
+    SELECT
+        d.id,
+        td.nome AS tipo_documento,
+        td.escopo,
+        d.titulo,
+        d.data_emissao,
+        d.data_vencimento,
+        d.revisao_necessaria,
+        c.nome AS colaborador_nome,
+        c.matricula,
+        f.nome AS filial_nome,
+        CASE
+            WHEN d.revisao_necessaria = TRUE THEN 'Revisão necessária'
+            WHEN d.data_vencimento IS NULL THEN 'Vigente'
+            WHEN d.data_vencimento < CURRENT_DATE THEN 'Vencido'
+            WHEN d.data_vencimento <= CURRENT_DATE + INTERVAL '30 days' THEN 'A vencer'
+            ELSE 'Vigente'
+        END AS status_calculado
+    FROM documentos_sst d
+    JOIN tipos_documento_sst td ON td.id = d.tipo_documento_id
+    LEFT JOIN colaboradores c ON c.id = d.colaborador_id
+    LEFT JOIN filiais f ON f.id = d.filial_id
+    WHERE d.empresa_id = %s
+    ORDER BY d.data_vencimento NULLS LAST, d.id DESC
+    """,
+        (empresa_id,),
+    ).fetchall()
+
+    docs_filtrados = []
+    for doc in documentos:
+        if filtro_status_sst != "Todos" and doc["status"] != filtro_status_sst:
+            continue
+        if filtro_tipo_sst != "Todos" and doc["tipo_documento"] != filtro_tipo_sst:
+            continue
+        filial_nome_doc = doc.get("filial_nome") or "Empresa / Geral"
+        if filtro_filial_sst != "Todas" and filial_nome_doc != filtro_filial_sst:
+            continue
+        docs_filtrados.append(doc)
+
+    if docs_filtrados:
+        docs_filtrados, _, _ = paginar_registros(
+            docs_filtrados,
+            "pagina_documentos_sst",
+            page_size=10,
+        )
+        for doc in docs_filtrados:
+            doc_id = doc["id"]
+            with st.container(border=True):
+                c1, c2, c3, c4 = st.columns([2.4, 1.2, 1.2, 1.5])
+                with c1:
+                    st.write(f"**{doc['titulo']}**")
+                    st.caption(doc["tipo_documento"])
+                    st.caption(
+                        f"Filial: {doc.get('filial_nome') or 'Empresa / Geral'}"
+                        + (
+                            f" • Colaborador: {doc.get('colaborador_nome')}"
+                            if doc.get("colaborador_nome")
+                            else ""
+                        )
+                    )
+                with c2:
+                    st.write(
+                        f"Emissão: {doc['data_emissao'].strftime('%d/%m/%Y') if doc.get('data_emissao') else '-'}"
+                    )
+                    st.caption(
+                        f"Vencimento: {doc['data_vencimento'].strftime('%d/%m/%Y') if doc.get('data_vencimento') else '-'}"
+                    )
+                with c3:
+                    st.write(f"Status: **{doc['status']}**")
+                    st.caption(
+                        "Revisão pendente"
+                        if doc.get("revisao_necessaria")
+                        else "Sem revisão pendente"
+                    )
+                with c4:
+                    a1, a2 = st.columns(2)
+                    with a1:
+                        if st.button(
+                            "Baixar",
+                            key=f"baixar_sst_{doc_id}",
+                            use_container_width=True,
+                        ):
+                            pass
+                    with a2:
+                        if st.button(
+                            "Excluir",
+                            key=f"excluir_sst_{doc_id}",
+                            use_container_width=True,
+                        ):
+                            conn.execute(
+                                "DELETE FROM documentos_sst WHERE id = %s AND empresa_id = %s",
+                                (doc_id, empresa_id),
+                            )
+                            st.success("Documento excluído.")
+                            st.rerun()
+
+                if doc.get("observacao"):
+                    st.caption(doc["observacao"])
+
+                render_documento_sst_arquivo(doc_id, prefixo="sst_download")
+    else:
+        st.info("Nenhum documento SST encontrado com os filtros aplicados.")
+
+elif menu == "Vencimentos SST" and perfil_atual in ("admin", "gestor"):
+    exigir_perfil("admin", "gestor")
+    st.header("Vencimentos SST")
+    empresa_id = get_empresa_contexto()
+    atualizar_status_documentos_sst_empresa(empresa_id)
+
+    resumo = conn.execute(
+        """
+        SELECT
+            COUNT(*) FILTER (WHERE status = 'Vencido') AS vencidos,
+            COUNT(*) FILTER (WHERE status = 'A vencer') AS a_vencer,
+            COUNT(*) FILTER (WHERE status = 'Revisão necessária') AS revisao,
+            COUNT(*) FILTER (WHERE status = 'Vigente') AS vigentes
+        FROM documentos_sst
+        WHERE empresa_id = %s
+        """,
+        (empresa_id,),
+    ).fetchone()
+
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Vencidos", int((resumo or {}).get("vencidos") or 0))
+    r2.metric("A vencer em 30 dias", int((resumo or {}).get("a_vencer") or 0))
+    r3.metric("Em revisão", int((resumo or {}).get("revisao") or 0))
+    r4.metric("Vigentes", int((resumo or {}).get("vigentes") or 0))
+
+    tabela = conn.execute(
+        """
+        SELECT
+            d.id,
+            t.nome AS tipo_documento,
+            d.titulo,
+            f.nome AS filial_nome,
+            c.nome AS colaborador_nome,
+            d.data_emissao,
+            d.data_vencimento,
+            d.status
+        FROM documentos_sst d
+        JOIN tipos_documento_sst t ON t.id = d.tipo_documento_id
+        LEFT JOIN filiais f ON f.id = d.filial_id
+        LEFT JOIN colaboradores c ON c.id = d.colaborador_id
+        WHERE d.empresa_id = %s
+        ORDER BY
+            CASE d.status
+                WHEN 'Vencido' THEN 1
+                WHEN 'A vencer' THEN 2
+                WHEN 'Revisão necessária' THEN 3
+                WHEN 'Vigente' THEN 4
+                ELSE 5
+            END,
+            d.data_vencimento NULLS LAST,
+            d.id DESC
+        """,
+        (empresa_id,),
+    ).fetchall()
+
+    if tabela:
+        df_sst = pd.DataFrame(tabela)
+        for coluna in ["data_emissao", "data_vencimento"]:
+            if coluna in df_sst.columns:
+                df_sst[coluna] = pd.to_datetime(
+                    df_sst[coluna], errors="coerce"
+                ).dt.strftime("%d/%m/%Y")
+                df_sst[coluna] = df_sst[coluna].fillna("-")
+        df_sst = df_sst.rename(
+            columns={
+                "tipo_documento": "Tipo",
+                "titulo": "Título",
+                "filial_nome": "Filial",
+                "colaborador_nome": "Colaborador",
+                "data_emissao": "Emissão",
+                "data_vencimento": "Vencimento",
+                "status": "Status",
+            }
+        )
+        df_sst["Filial"] = df_sst["Filial"].fillna("Empresa / Geral")
+        df_sst["Colaborador"] = df_sst["Colaborador"].fillna("-")
+        st.dataframe(
+            df_sst[
+                [
+                    "Tipo",
+                    "Título",
+                    "Filial",
+                    "Colaborador",
+                    "Emissão",
+                    "Vencimento",
+                    "Status",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info("Nenhum documento SST cadastrado ainda.")
+
+elif menu == "Cadastro de Operadores" and perfil_atual in ("superadmin", "operador"):
+    st.header("Cadastro de Operadores")
+    st.caption("Gestão de usuários internos da plataforma.")
+
+    with st.expander("Novo operador", expanded=True):
+        nome_operador = st.text_input("Nome do operador", key="novo_operador_nome")
+        usuario_operador = st.text_input(
+            "Usuário do operador",
+            value=gerar_usuario(nome_operador) if nome_operador.strip() else "",
+            key="novo_operador_usuario",
+        )
+        email_operador = st.text_input("E-mail", key="novo_operador_email")
+        senha_operador = st.text_input(
+            "Senha", type="password", key="novo_operador_senha"
+        )
+        ativo_operador = st.checkbox("Ativo", value=True, key="novo_operador_ativo")
+
+        if st.button("Cadastrar Operador", key="btn_cadastrar_operador"):
             if (
-                not nome_atendente.strip()
-                or not usuario_atendente.strip()
-                or not senha_atendente.strip()
+                not nome_operador.strip()
+                or not usuario_operador.strip()
+                or not senha_operador.strip()
             ):
                 st.error("Preencha nome, usuário e senha.")
             else:
                 existe = conn.execute(
                     "SELECT 1 FROM atendentes WHERE usuario = %s",
-                    (usuario_atendente.strip(),),
+                    (usuario_operador.strip(),),
                 ).fetchone()
+
                 if existe:
-                    st.error("Já existe um atendente com esse usuário.")
+                    st.error("Já existe um operador com esse usuário.")
                 else:
                     conn.execute(
                         """
@@ -4380,147 +5928,151 @@ elif menu == "Cadastro de Atendentes" and perfil_atual == "admin":
                         VALUES (%s, %s, %s, %s, %s)
                         """,
                         (
-                            nome_atendente.strip(),
-                            usuario_atendente.strip(),
-                            gerar_hash_senha(senha_atendente.strip()),
-                            email_atendente.strip().lower(),
-                            ativo_atendente,
+                            nome_operador.strip(),
+                            usuario_operador.strip(),
+                            gerar_hash_senha(senha_operador.strip()),
+                            email_operador.strip().lower(),
+                            ativo_operador,
                         ),
                     )
-                    st.success("Atendente cadastrado com sucesso.")
+                    st.success("Operador cadastrado com sucesso.")
                     st.rerun()
 
     st.markdown("---")
-    st.subheader("Atendentes cadastrados")
+    st.subheader("Operadores cadastrados")
 
-    if "atendente_editando_id" not in st.session_state:
-        st.session_state.atendente_editando_id = None
+    if "operador_editando_id" not in st.session_state:
+        st.session_state.operador_editando_id = None
 
-    atendentes = obter_todos_atendentes()
+    operadores = obter_todos_atendentes()
 
-    if atendentes:
-        atendentes, _, _ = paginar_registros(
-            atendentes, "pagina_atendentes_cadastro", page_size=10
+    if operadores:
+        operadores, _, _ = paginar_registros(
+            operadores, "pagina_operadores_cadastro", page_size=10
         )
-        for atendente in atendentes:
-            atendente_id = atendente["id"]
+
+        for operador in operadores:
+            operador_id = operador["id"]
+
             with st.container(border=True):
                 col1, col2, col3 = st.columns([2.2, 2.4, 3.4])
 
                 with col1:
-                    st.write(f"**{atendente['usuario']}**")
-                    st.caption(atendente["nome"] or "")
+                    st.write(f"**{operador['usuario']}**")
+                    st.caption(operador["nome"] or "")
 
                 with col2:
-                    st.write(atendente["email"] or "Sem e-mail")
-                    st.write("Ativo" if bool(atendente["ativo"]) else "Inativo")
+                    st.write(operador["email"] or "Sem e-mail")
+                    st.write("Ativo" if bool(operador["ativo"]) else "Inativo")
 
                 with col3:
                     b1, b2, b3 = st.columns(3)
+
                     with b1:
-                        if bool(atendente["ativo"]):
+                        if bool(operador["ativo"]):
                             if st.button(
                                 "Inativar",
-                                key=f"inativar_atendente_{atendente_id}",
+                                key=f"inativar_operador_{operador_id}",
                                 use_container_width=True,
                             ):
                                 conn.execute(
                                     "UPDATE atendentes SET ativo = FALSE WHERE id = %s",
-                                    (atendente_id,),
+                                    (operador_id,),
                                 )
                                 st.rerun()
                         else:
                             if st.button(
                                 "Ativar",
-                                key=f"ativar_atendente_{atendente_id}",
+                                key=f"ativar_operador_{operador_id}",
                                 use_container_width=True,
                             ):
                                 conn.execute(
                                     "UPDATE atendentes SET ativo = TRUE WHERE id = %s",
-                                    (atendente_id,),
+                                    (operador_id,),
                                 )
                                 st.rerun()
 
                     with b2:
                         if st.button(
                             "Excluir",
-                            key=f"excluir_atendente_{atendente_id}",
+                            key=f"excluir_operador_{operador_id}",
                             use_container_width=True,
                         ):
                             possui_vinculo = conn.execute(
                                 "SELECT 1 FROM solicitacoes WHERE atendente_id = %s LIMIT 1",
-                                (atendente_id,),
+                                (operador_id,),
                             ).fetchone()
 
                             if possui_vinculo:
                                 st.warning(
-                                    "Este atendente já está vinculado a solicitações. Inative ao invés de excluir."
+                                    "Este operador já está vinculado a registros. Inative ao invés de excluir."
                                 )
                             else:
                                 conn.execute(
                                     "DELETE FROM atendentes WHERE id = %s",
-                                    (atendente_id,),
+                                    (operador_id,),
                                 )
-                                st.success("Atendente excluído.")
+                                st.success("Operador excluído.")
                                 st.rerun()
 
                     with b3:
                         if st.button(
                             "Alterar",
-                            key=f"alterar_atendente_{atendente_id}",
+                            key=f"alterar_operador_{operador_id}",
                             use_container_width=True,
                         ):
-                            st.session_state.atendente_editando_id = atendente_id
+                            st.session_state.operador_editando_id = operador_id
                             st.rerun()
 
-                if st.session_state.atendente_editando_id == atendente_id:
+                if st.session_state.operador_editando_id == operador_id:
                     ed1, ed2 = st.columns(2)
 
                     with ed1:
-                        novo_nome_at = st.text_input(
+                        novo_nome_op = st.text_input(
                             "Nome",
-                            value=atendente["nome"] or "",
-                            key=f"edit_at_nome_{atendente_id}",
+                            value=operador["nome"] or "",
+                            key=f"edit_op_nome_{operador_id}",
                         )
-                        novo_usuario_at = st.text_input(
+                        novo_usuario_op = st.text_input(
                             "Usuário",
-                            value=atendente["usuario"] or "",
-                            key=f"edit_at_usuario_{atendente_id}",
+                            value=operador["usuario"] or "",
+                            key=f"edit_op_usuario_{operador_id}",
                         )
 
                     with ed2:
-                        novo_email_at = st.text_input(
+                        novo_email_op = st.text_input(
                             "E-mail",
-                            value=atendente["email"] or "",
-                            key=f"edit_at_email_{atendente_id}",
+                            value=operador["email"] or "",
+                            key=f"edit_op_email_{operador_id}",
                         )
-                        nova_senha_at = st.text_input(
+                        nova_senha_op = st.text_input(
                             "Nova senha (opcional)",
                             type="password",
-                            key=f"edit_at_senha_{atendente_id}",
+                            key=f"edit_op_senha_{operador_id}",
                         )
 
                     a1, a2 = st.columns(2)
+
                     with a1:
                         if st.button(
                             "Salvar alteração",
-                            key=f"salvar_atendente_{atendente_id}",
+                            key=f"salvar_operador_{operador_id}",
                             use_container_width=True,
                         ):
-                            if not novo_nome_at.strip() or not novo_usuario_at.strip():
+                            if not novo_nome_op.strip() or not novo_usuario_op.strip():
                                 st.error("Preencha nome e usuário.")
                             else:
                                 usuario_existente = conn.execute(
                                     "SELECT 1 FROM atendentes WHERE usuario = %s AND id <> %s",
-                                    (novo_usuario_at.strip(), atendente_id),
+                                    (novo_usuario_op.strip(), operador_id),
                                 ).fetchone()
 
                                 if usuario_existente:
                                     st.error(
-                                        "Já existe outro atendente com esse usuário."
+                                        "Já existe outro operador com esse usuário."
                                     )
                                 else:
-                                    if nova_senha_at.strip():
+                                    if nova_senha_op.strip():
                                         conn.execute(
                                             """
                                             UPDATE atendentes
@@ -4528,11 +6080,11 @@ elif menu == "Cadastro de Atendentes" and perfil_atual == "admin":
                                             WHERE id = %s
                                             """,
                                             (
-                                                novo_nome_at.strip(),
-                                                novo_usuario_at.strip(),
-                                                novo_email_at.strip().lower(),
-                                                gerar_hash_senha(nova_senha_at.strip()),
-                                                atendente_id,
+                                                novo_nome_op.strip(),
+                                                novo_usuario_op.strip(),
+                                                novo_email_op.strip().lower(),
+                                                gerar_hash_senha(nova_senha_op.strip()),
+                                                operador_id,
                                             ),
                                         )
                                     else:
@@ -4543,26 +6095,27 @@ elif menu == "Cadastro de Atendentes" and perfil_atual == "admin":
                                             WHERE id = %s
                                             """,
                                             (
-                                                novo_nome_at.strip(),
-                                                novo_usuario_at.strip(),
-                                                novo_email_at.strip().lower(),
-                                                atendente_id,
+                                                novo_nome_op.strip(),
+                                                novo_usuario_op.strip(),
+                                                novo_email_op.strip().lower(),
+                                                operador_id,
                                             ),
                                         )
 
-                                    st.session_state.atendente_editando_id = None
-                                    st.success("Atendente atualizado com sucesso.")
+                                    st.session_state.operador_editando_id = None
+                                    st.success("Operador atualizado com sucesso.")
                                     st.rerun()
+
                     with a2:
                         if st.button(
                             "Cancelar alteração",
-                            key=f"cancelar_atendente_{atendente_id}",
+                            key=f"cancelar_operador_{operador_id}",
                             use_container_width=True,
                         ):
-                            st.session_state.atendente_editando_id = None
+                            st.session_state.operador_editando_id = None
                             st.rerun()
     else:
-        st.info("Nenhum atendente cadastrado ainda.")
+        st.info("Nenhum operador cadastrado ainda.")
 
 
 elif menu == "Painel de Cadastros" and perfil_atual == "admin":
