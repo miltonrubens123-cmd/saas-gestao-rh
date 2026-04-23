@@ -309,10 +309,14 @@ APP_DATA_DIR = Path.home() / ".businessvision"
 APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 logo_candidates = [
+    BASE_DIR / "app" / "imagens" / "logo.png",
+    BASE_DIR / "app" / "imagens" / "Logo.png",
     BASE_DIR / "imagens" / "logo.png",
     BASE_DIR / "imagens" / "Logo.png",
     BASE_DIR / "Logo.png",
     BASE_DIR / "logo.png",
+    BASE_DIR.parent / "app" / "imagens" / "logo.png",
+    BASE_DIR.parent / "app" / "imagens" / "Logo.png",
     BASE_DIR.parent / "Logo.png",
     BASE_DIR.parent / "logo.png",
 ]
@@ -1202,814 +1206,160 @@ def persistir_query_params():
 
 
 if not st.session_state.logado:
-    restaurar_login()
-    persistir_query_params()
-
-
-def logout():
-    token = st.session_state.get("token_sessao")
-    excluir_sessao(token)
-    st.session_state.clear()
-    st.query_params.clear()
-    st.rerun()
-
-
-def limpar_formulario():
-    st.session_state.limpar_campos_nova_solicitacao = True
-    st.rerun()
-
-
-def nova_solicitacao():
-    st.session_state.titulo = ""
-    st.session_state.descricao = ""
-    st.session_state.limpar_campos_nova_solicitacao = False
-    st.rerun()
-
-
-def paginar_registros(registros, state_key, page_size=12):
-    total = len(registros or [])
-    if total <= page_size:
-        return registros, 1, 1
-
-    total_paginas = (total + page_size - 1) // page_size
-    pagina_atual = int(st.session_state.get(state_key, 1) or 1)
-    pagina_atual = max(1, min(pagina_atual, total_paginas))
-    st.session_state[state_key] = pagina_atual
-
-    inicio = (pagina_atual - 1) * page_size
-    fim = inicio + page_size
-
-    nav1, nav2, nav3 = st.columns([1, 1.3, 1])
-    with nav1:
-        if st.button(
-            "← Anterior",
-            key=f"{state_key}_prev",
-            use_container_width=True,
-            disabled=pagina_atual == 1,
-        ):
-            st.session_state[state_key] = pagina_atual - 1
-            st.rerun()
-    with nav2:
-        st.caption(f"Página {pagina_atual} de {total_paginas} • {total} registros")
-    with nav3:
-        if st.button(
-            "Próxima →",
-            key=f"{state_key}_next",
-            use_container_width=True,
-            disabled=pagina_atual >= total_paginas,
-        ):
-            st.session_state[state_key] = pagina_atual + 1
-            st.rerun()
-
-    return registros[inicio:fim], pagina_atual, total_paginas
-
-
-def normalizar_status(status):
-    mapa = {
-        "Pendente": "Em análise",
-        "Iniciado": "Em atendimento",
-        "Pausado": "Aguardando cliente",
-        "Resolvido": "Concluído",
-        "Em análise": "Em análise",
-        "Em atendimento": "Em atendimento",
-        "Aguardando cliente": "Aguardando cliente",
-        "Concluído": "Concluído",
-    }
-    return mapa.get(status, status)
-
-
-def formatar_status_texto(status):
-    status = normalizar_status(status)
-    status_map = {
-        "Em análise": "🔴 Em análise",
-        "Em atendimento": "🟢 Em atendimento",
-        "Aguardando cliente": "🟡 Aguardando cliente",
-        "Concluído": "🔵 Concluído",
-    }
-    return status_map.get(status, status)
-
-
-def obter_atendentes_ativos():
-    return conn.execute(
-        """
-        SELECT id, nome, usuario, email, ativo, created_at
-        FROM atendentes
-        WHERE ativo = TRUE
-        ORDER BY nome, usuario
-        """
-    ).fetchall()
-
-
-def obter_todos_atendentes():
-    return conn.execute(
-        """
-        SELECT id, nome, usuario, email, ativo, created_at
-        FROM atendentes
-        ORDER BY nome, usuario
-        """
-    ).fetchall()
-
-
-def obter_clientes_ativos():
-    return conn.execute(
-        """
-        SELECT usuario, nome
-        FROM clientes
-        WHERE ativo = TRUE
-        ORDER BY nome, usuario
-        """
-    ).fetchall()
-
-
-def obter_nome_cliente(usuario):
-    row = conn.execute(
-        "SELECT nome FROM clientes WHERE usuario = %s",
-        (usuario,),
-    ).fetchone()
-    return row["nome"] if row and row["nome"] else usuario
-
-
-def atualizar_solicitacao(solicitacao_id, novo_status, observacao):
-    novo_status = normalizar_status(novo_status)
-
-    atual = conn.execute(
-        """
-        SELECT inicio_atendimento, fim_atendimento
-        FROM solicitacoes
-        WHERE id = %s
-        """,
-        (solicitacao_id,),
-    ).fetchone()
-
-    inicio_atendimento = atual["inicio_atendimento"] if atual else None
-    fim_atendimento = atual["fim_atendimento"] if atual else None
-    agora_atendimento = agora()
-
-    if novo_status == "Em atendimento" and not inicio_atendimento:
-        inicio_atendimento = agora_atendimento
-
-    if novo_status == "Concluído":
-        fim_atendimento = agora_atendimento
-
-    conn.execute(
-        """
-        UPDATE solicitacoes
-        SET status = %s,
-            resposta = %s,
-            inicio_atendimento = %s,
-            fim_atendimento = %s
-        WHERE id = %s
-        """,
-        (
-            novo_status,
-            (observacao or "").strip(),
-            inicio_atendimento,
-            fim_atendimento,
-            solicitacao_id,
-        ),
-    )
-
-
-def render_anexos_como_arquivo(solicitacao_id, prefixo="anexo"):
-    anexos = conn.execute(
-        """
-        SELECT id, nome_arquivo, observacao, imagem
-        FROM anexos
-        WHERE solicitacao_id = %s
-        ORDER BY id
-        """,
-        (solicitacao_id,),
-    ).fetchall()
-
-    if not anexos:
-        return
-
-    st.markdown("**Anexos do cliente:**")
-    for anexo in anexos:
-        nome_arquivo = anexo["nome_arquivo"] or "arquivo"
-        observacao = anexo["observacao"] or "Sem observação"
-        ext = Path(nome_arquivo).suffix.lower()
-        mime = "image/png"
-        if ext in [".jpg", ".jpeg"]:
-            mime = "image/jpeg"
-        elif ext == ".webp":
-            mime = "image/webp"
-
-        with st.expander(f"📎 {nome_arquivo}"):
-            st.caption(observacao)
-            st.image(anexo["imagem"], use_container_width=True)
-            st.download_button(
-                label="Baixar arquivo",
-                data=anexo["imagem"],
-                file_name=nome_arquivo,
-                mime=mime,
-                key=f"{prefixo}_download_{anexo['id']}",
-                use_container_width=False,
-            )
-
-
-def obter_solicitacoes_filtradas(
-    cliente_id=None,
-    cliente_usuario=None,
-    empresa_id=None,
-    status_filtro="Todos",
-    prioridade_filtro="Todas",
-    busca="",
-    limite=50,
-    atendente_usuario=None,
-):
-    filtros = []
-    params = []
-
-    if atendente_usuario:
-        atendente = obter_atendente_por_usuario(atendente_usuario)
-        if atendente:
-            filtros.append("s.atendente_id = %s")
-            params.append(atendente["id"])
-        else:
-            return []
-
-    if cliente_id is not None:
-        filtros.append("s.cliente_id = %s")
-        params.append(cliente_id)
-    elif empresa_id is not None:
-
-        filtros.append("s.empresa_id = %s")
-        params.append(empresa_id)
-    elif cliente_usuario:
-        cliente_ref = obter_cliente_por_usuario(cliente_usuario)
-        if not cliente_ref:
-            return []
-        filtros.append("s.cliente_id = %s")
-        params.append(cliente_ref["id"])
-
-    if status_filtro != "Todos":
-        filtros.append(
-            """
-            CASE
-                WHEN s.status = 'Pendente' THEN 'Em análise'
-                WHEN s.status = 'Iniciado' THEN 'Em atendimento'
-                WHEN s.status = 'Pausado' THEN 'Aguardando cliente'
-                WHEN s.status = 'Resolvido' THEN 'Concluído'
-                ELSE s.status
-            END = %s
-            """
-        )
-        params.append(status_filtro)
-
-    if prioridade_filtro != "Todas":
-        filtros.append("COALESCE(s.prioridade, '') = %s")
-        params.append(prioridade_filtro)
-
-    busca = (busca or "").strip()
-    if busca:
-        if busca.isdigit():
-            filtros.append("(CAST(s.id AS TEXT) = %s OR s.titulo ILIKE %s)")
-            params.append(busca)
-            params.append(f"%{busca}%")
-        else:
-            filtros.append("s.titulo ILIKE %s")
-            params.append(f"%{busca}%")
-
-    where_clause = " AND ".join(filtros) if filtros else "TRUE"
-
-    sql = f"""
-        SELECT
-            s.id,
-            s.cliente,
-            s.cliente_id,
-            s.empresa_id,
-            s.atendente_id,
-            a.nome AS atendente_nome,
-            s.atribuido_em,
-            s.titulo,
-            s.descricao,
-            s.prioridade,
-            s.status,
-            s.complexidade,
-            s.resposta,
-            s.data_criacao,
-            s.inicio_atendimento,
-            s.fim_atendimento
-        FROM solicitacoes s
-        LEFT JOIN atendentes a ON a.id = s.atendente_id
-        WHERE {where_clause}
-        ORDER BY s.id DESC
-        LIMIT %s
-    """
-    params.append(limite)
-
-    rows = conn.execute(sql, params).fetchall()
-    dados = []
-    for row in rows:
-        item = dict(row)
-        item["status"] = normalizar_status(item.get("status"))
-        dados.append(item)
-    return dados
-
-
-def agrupar_solicitacoes_por_cliente(solicitacoes):
-    grupos = defaultdict(list)
-    for item in solicitacoes:
-        chave = (item.get("cliente_id"), item.get("cliente"))
-        grupos[chave].append(item)
-    return grupos
-
-
-def montar_url_convite(token_convite):
-    base_url = (
-        st.secrets.get("APP_BASE_URL") or os.getenv("APP_BASE_URL", "") or ""
-    ).strip()
-
-    if not base_url:
-        return f"?invite={quote_plus(token_convite)}"
-
-    base_url = base_url.rstrip("/")
-    return f"{base_url}/?invite={quote_plus(token_convite)}"
-
-
-def gerar_token_convite():
-    return secrets.token_urlsafe(24)
-
-
-def convite_expirado(convite):
-    expiracao = convite.get("expiracao_em")
-    if not expiracao:
-        return False
-    if expiracao.tzinfo is None:
-        return expiracao < agora().replace(tzinfo=None)
-    return expiracao < agora()
-
-
-def obter_convite_por_token(token):
-    convite = conn.execute(
-        """
-        SELECT c.*, e.fantasia AS empresa_nome
-        FROM convites_cadastro c
-        LEFT JOIN empresas e ON e.id = c.empresa_id
-        WHERE c.token = %s
-        LIMIT 1
-        """,
-        (token,),
-    ).fetchone()
-
-    if (
-        convite
-        and convite["status"] in ("pendente", "enviado")
-        and convite_expirado(convite)
-    ):
-        conn.execute(
-            "UPDATE convites_cadastro SET status = 'expirado' WHERE id = %s",
-            (convite["id"],),
-        )
-        convite = conn.execute(
-            """
-            SELECT c.*, e.fantasia AS empresa_nome
-            FROM convites_cadastro c
-            LEFT JOIN empresas e ON e.id = c.empresa_id
-            WHERE c.token = %s
-            LIMIT 1
-            """,
-            (token,),
-        ).fetchone()
-    return convite
-
-
-def criar_convite(nome, email, empresa_id, tipo_usuario, observacao=""):
-    token = gerar_token_convite()
-    usuario_sugerido = gerar_usuario(nome)
-    enviado_em = agora()
-    expiracao_em = agora() + timedelta(hours=CONVITE_EXPIRACAO_HORAS)
-
-    convite = conn.execute(
-        """
-        INSERT INTO convites_cadastro
-        (nome, email, empresa_id, tipo_usuario, token, status, observacao, usuario_sugerido, enviado_em, expiracao_em)
-        VALUES (%s, %s, %s, %s, %s, 'enviado', %s, %s, %s, %s)
-        RETURNING id
-        """,
-        (
-            nome.strip(),
-            email.strip().lower(),
-            empresa_id,
-            tipo_usuario,
-            token,
-            observacao.strip(),
-            usuario_sugerido,
-            enviado_em,
-            expiracao_em,
-        ),
-    ).fetchone()
-
-    link_convite = montar_url_convite(token)
-    email_enviado = False
-    email_msg = "Configuração de e-mail não encontrada. O convite foi criado apenas com link manual."
-
-    if email_configurada():
-        email_enviado, email_msg = enviar_email_convite(
-            destinatario=email.strip().lower(),
-            nome=nome.strip(),
-            link=link_convite,
-        )
-
-    return {
-        "id": convite["id"],
-        "token": token,
-        "link": link_convite,
-        "email_enviado": email_enviado,
-        "email_msg": email_msg,
-    }
-
-
-def reenviar_convite(convite_id):
-    convite = conn.execute(
-        """
-        SELECT id, nome, email
-        FROM convites_cadastro
-        WHERE id = %s
-        LIMIT 1
-        """,
-        (convite_id,),
-    ).fetchone()
-
-    if not convite:
-        raise ValueError("Convite não encontrado.")
-
-    token = gerar_token_convite()
-    enviado_em = agora()
-    expiracao_em = agora() + timedelta(hours=CONVITE_EXPIRACAO_HORAS)
-
-    conn.execute(
-        """
-        UPDATE convites_cadastro
-        SET token = %s,
-            status = 'enviado',
-            enviado_em = %s,
-            expiracao_em = %s
-        WHERE id = %s
-        """,
-        (token, enviado_em, expiracao_em, convite_id),
-    )
-
-    link_convite = montar_url_convite(token)
-    email_enviado = False
-    email_msg = "Configuração de e-mail não encontrada. O convite foi renovado apenas com link manual."
-
-    if email_configurada():
-        email_enviado, email_msg = enviar_email_convite(
-            destinatario=convite["email"],
-            nome=convite["nome"],
-            link=link_convite,
-        )
-
-    return {
-        "token": token,
-        "link": link_convite,
-        "email_enviado": email_enviado,
-        "email_msg": email_msg,
-    }
-
-
-def concluir_convite(
-    convite, nome, usuario, senha, cpf="", funcao="", email="", nome_atendente=""
-):
-    tipo = convite["tipo_usuario"]
-
-    if tipo == "cliente":
-        existe = conn.execute(
-            "SELECT 1 FROM clientes WHERE usuario = %s",
-            (usuario,),
-        ).fetchone()
-        if existe:
-            raise ValueError("Já existe um cliente com esse usuário.")
-
-        conn.execute(
-            """
-            INSERT INTO clientes (usuario, senha, nome, ativo, cpf, empresa_id, funcao, email)
-            VALUES (%s, %s, %s, TRUE, %s, %s, %s, %s)
-            """,
-            (
-                usuario,
-                gerar_hash_senha(senha),
-                nome,
-                cpf,
-                convite["empresa_id"],
-                funcao,
-                email.strip().lower(),
-            ),
-        )
-    else:
-        existe = conn.execute(
-            "SELECT 1 FROM atendentes WHERE usuario = %s",
-            (usuario,),
-        ).fetchone()
-        if existe:
-            raise ValueError("Já existe um atendente com esse usuário.")
-
-        conn.execute(
-            """
-            INSERT INTO atendentes (nome, usuario, senha, email, ativo)
-            VALUES (%s, %s, %s, %s, TRUE)
-            """,
-            (
-                nome_atendente or nome,
-                usuario,
-                gerar_hash_senha(senha),
-                email.strip().lower(),
-            ),
-        )
-
-    conn.execute(
-        """
-        UPDATE convites_cadastro
-        SET status = 'concluido',
-            utilizado_em = %s
-        WHERE id = %s
-        """,
-        (agora(), convite["id"]),
-    )
-
-
-def aplicar_estilo_login():
-    st.markdown(
-        """
-        <style>
-        .stApp {
-            background: linear-gradient(180deg, #061C33 0%, #0B3A63 100%);
-        }
-
-        section[data-testid="stSidebar"] {
-            display: none;
-        }
-
-        .block-container {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            padding-top: 0 !important;
-            padding-bottom: 0 !important;
-        }
-
-        .stTextInput label, .stSelectbox label {
-            color: #dfeaf5 !important;
-            font-weight: 600 !important;
-        }
-
-        .stTextInput > div > div > input {
-            background-color: rgba(255,255,255,0.06) !important;
-            color: white !important;
-            border: 1px solid rgba(173, 216, 255, 0.22) !important;
-            border-radius: 10px !important;
-        }
-
-        .stButton > button {
-            width: 100%;
-            border-radius: 12px;
-            font-weight: 700;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_tela_convite(token_convite):
-    aplicar_estilo_login()
-
-    st.markdown(
-        """
-        <style>
-        .convite-wrap {
-            width: 100%;
-            max-width: 520px;
-            margin: 0 auto;
-            padding: 12px 10px 32px 10px;
-        }
-
-        .convite-logo {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 14px;
-        }
-
-        .convite-logo img {
-            max-width: 120px;
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-
-        .convite-titulo {
-            text-align: center;
-            color: white;
-            font-size: 24px;
-            font-weight: 700;
-            line-height: 1.2;
-            margin-bottom: 6px;
-        }
-
-        .convite-subtitulo {
-            text-align: center;
-            color: #c7d7e6;
-            font-size: 15px;
-            margin-bottom: 18px;
-        }
-
-        @media (max-width: 640px) {
-            .block-container {
-                padding-left: 12px !important;
-                padding-right: 12px !important;
-                padding-top: 18px !important;
-                padding-bottom: 18px !important;
-            }
-
-            .convite-wrap {
-                max-width: 100%;
-                padding: 8px 4px 24px 4px;
-            }
-
-            .convite-logo img {
-                max-width: 88px;
-            }
-
-            .convite-titulo {
-                font-size: 20px;
-            }
-
-            .convite-subtitulo {
-                font-size: 14px;
-            }
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    convite = obter_convite_por_token(token_convite)
-
-    st.markdown('<div class="convite-wrap">', unsafe_allow_html=True)
-
-    if logo_b64:
-        st.markdown(
-            f"""
-            <div class="convite-logo">
-                <img src="data:image/png;base64,{logo_b64}">
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.markdown(
-        '<div class="convite-titulo">GESTÃO RH</div>',
-        unsafe_allow_html=True,
-    )
-
-    if not convite:
-        st.error("Convite inválido.")
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.stop()
-
-    if convite["status"] == "concluido":
-        st.success("Este convite já foi utilizado.")
-        portal_url = (
-            st.secrets.get("APP_BASE_URL") or os.getenv("APP_BASE_URL", "") or ""
-        ).rstrip("/")
-        if portal_url:
-            st.link_button("Acessar portal", portal_url, use_container_width=True)
-            st.caption(f"Portal: {portal_url}")
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.stop()
-
-    if convite["status"] in ("cancelado", "expirado") or convite_expirado(convite):
-        st.error("Este convite expirou ou foi cancelado.")
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.stop()
-
-    st.markdown(
-        '<div class="convite-subtitulo">Concluir cadastro</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.info(
-        f"Convite para {convite['nome']} • Perfil: {convite['tipo_usuario'].capitalize()}"
-        + (
-            f" • Empresa: {convite['empresa_nome']}"
-            if convite.get("empresa_nome")
-            else ""
-        )
-    )
-
-    email = st.text_input("E-mail", value=convite["email"], disabled=True)
-    nome = st.text_input("Nome completo", value=convite["nome"])
-    usuario = st.text_input(
-        "Usuário",
-        value=convite.get("usuario_sugerido") or gerar_usuario(convite["nome"]),
-    )
-    senha = st.text_input("Senha", type="password")
-    confirmar_senha = st.text_input("Confirmar senha", type="password")
-
-    cpf = ""
-    funcao = ""
-    if convite["tipo_usuario"] == "cliente":
-        cpf = st.text_input("CPF")
-        funcao = st.text_input("Função")
-    else:
-        funcao = st.text_input("Função / Cargo")
-
-    if st.button("Concluir cadastro", use_container_width=True):
-        if not nome.strip() or not usuario.strip() or not senha.strip():
-            st.error("Preencha nome, usuário e senha.")
-        elif senha != confirmar_senha:
-            st.error("As senhas não conferem.")
-        elif len(senha.strip()) < 6:
-            st.error("A senha deve ter pelo menos 6 caracteres.")
-        else:
-            try:
-                concluir_convite(
-                    convite=convite,
-                    nome=nome.strip(),
-                    usuario=usuario.strip(),
-                    senha=senha.strip(),
-                    cpf=cpf.strip(),
-                    funcao=funcao.strip(),
-                    email=email.strip(),
-                    nome_atendente=nome.strip(),
-                )
-
-                st.success(
-                    "Cadastro concluído com sucesso. Agora você já pode acessar o portal."
-                )
-
-                portal_url = (
-                    st.secrets.get("APP_BASE_URL")
-                    or os.getenv("APP_BASE_URL", "")
-                    or ""
-                ).rstrip("/")
-
-                st.info(f"Usuário cadastrado: {usuario}")
-
-                if portal_url:
-                    st.link_button(
-                        "Acessar portal", portal_url, use_container_width=True
-                    )
-                    st.caption(f"Portal: {portal_url}")
-                else:
-                    st.warning("URL do portal não configurada.")
-
-            except ValueError as exc:
-                st.error(str(exc))
-            except Exception as exc:
-                st.error(f"Erro ao concluir cadastro: {exc}")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.stop()
-
-
-invite_token = st.query_params.get("invite")
-if invite_token:
-    render_tela_convite(invite_token)
-
-
-if not st.session_state.logado:
     aplicar_estilo_login()
 
     modo_acesso = st.session_state.get("modo_acesso", "login")
 
-    topo1, topo2, topo3 = st.columns([1.2, 1, 1.2])
-    with topo2:
-        bt1, bt2 = st.columns(2)
-        with bt1:
-            if st.button("Entrar", key="btn_modo_login", use_container_width=True):
-                st.session_state.modo_acesso = "login"
-                st.rerun()
-        with bt2:
-            if st.button("Criar conta", key="btn_modo_cadastro", use_container_width=True):
-                st.session_state.modo_acesso = "cadastro"
-                st.rerun()
+    st.markdown(
+        """
+        <style>
+        .login-shell {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+        }
+        .login-brand {
+            min-height: 760px;
+            border-radius: 28px;
+            padding: 56px 48px;
+            background: linear-gradient(160deg, #071728 0%, #0b2d55 55%, #123c71 100%);
+            color: #f3f7fb;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            border: 1px solid rgba(255,255,255,0.08);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+        }
+        .login-brand h1 {
+            font-size: 42px;
+            line-height: 1.05;
+            margin: 26px 0 14px 0;
+            color: #ffffff;
+            font-weight: 800;
+        }
+        .login-brand p {
+            font-size: 17px;
+            line-height: 1.7;
+            color: #d7e6f7;
+            margin: 0 0 22px 0;
+        }
+        .login-brand ul {
+            list-style: none;
+            padding: 0;
+            margin: 24px 0 0 0;
+        }
+        .login-brand li {
+            margin: 0 0 14px 0;
+            color: #e7f0fb;
+            font-size: 15px;
+        }
+        .login-brand .brand-kicker {
+            color: #8fc2ff;
+            font-weight: 700;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            font-size: 12px;
+        }
+        .login-brand .brand-footer {
+            color: #aac7e8;
+            font-size: 13px;
+        }
+        .login-panel-wrap {
+            min-height: 760px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-panel {
+            width: 100%;
+            max-width: 520px;
+            background: rgba(5, 22, 38, 0.72);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 24px;
+            padding: 34px 30px 28px 30px;
+            box-shadow: 0 18px 54px rgba(0,0,0,0.22);
+        }
+        .login-panel h2 {
+            margin: 0 0 8px 0;
+            text-align: center;
+            color: #ffffff;
+            font-size: 18px;
+            font-weight: 800;
+            letter-spacing: .02em;
+        }
+        .login-panel .sub {
+            text-align: center;
+            color: #c8d8eb;
+            font-size: 14px;
+            margin-bottom: 18px;
+        }
+        .login-mode-row {
+            margin-bottom: 18px;
+        }
+        @media (max-width: 980px) {
+            .login-brand, .login-panel-wrap {
+                min-height: auto;
+            }
+            .login-brand {
+                padding: 36px 28px;
+            }
+            .login-brand h1 {
+                font-size: 34px;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    col1, col2, col3 = st.columns([1.2, 1, 1.2])
-    with col2:
+    st.markdown('<div class="login-shell">', unsafe_allow_html=True)
+    col_left, col_right = st.columns([1.05, 0.95], gap="large")
+
+    with col_left:
+        st.markdown('<div class="login-brand">', unsafe_allow_html=True)
         if logo_b64:
             st.markdown(
                 f"""
-                <div style='display:flex; justify-content:center; margin-bottom:18px;'>
-                    <img src='data:image/png;base64,{logo_b64}' width='140'>
+                <div>
+                    <img src='data:image/png;base64,{logo_b64}' style='max-width:180px; width:100%; height:auto;'>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-
         st.markdown(
-            "<div style='text-align:center; color:white; font-size:26px; font-weight:700;'>GESTÃO RH</div>",
+            """
+            <div>
+                <div class="brand-kicker">Plataforma corporativa</div>
+                <h1>Gestão RH para empresas que exigem controle.</h1>
+                <p>Centralize estrutura organizacional, usuários, colaboradores e indicadores em um ambiente seguro, profissional e preparado para crescer com a operação.</p>
+                <ul>
+                    <li>✔ Controle do quadro em tempo real</li>
+                    <li>✔ Estrutura por filiais, setores e cargos</li>
+                    <li>✔ Acesso segregado por empresa</li>
+                </ul>
+            </div>
+            <div class="brand-footer">Ambiente seguro, arquitetura SaaS e gestão orientada por dados.</div>
+            """,
             unsafe_allow_html=True,
         )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with col_right:
+        st.markdown('<div class="login-panel-wrap"><div class="login-panel">', unsafe_allow_html=True)
+
+        bt1, bt2 = st.columns(2)
+        with bt1:
+            if st.button("Entrar", key="btn_modo_login", use_container_width=True, type="primary" if modo_acesso == "login" else "secondary"):
+                st.session_state.modo_acesso = "login"
+                st.rerun()
+        with bt2:
+            if st.button("Criar conta", key="btn_modo_cadastro", use_container_width=True, type="primary" if modo_acesso == "cadastro" else "secondary"):
+                st.session_state.modo_acesso = "cadastro"
+                st.rerun()
 
         if modo_acesso == "cadastro":
-            st.markdown(
-                "<div style='text-align:center; color:#c7d7e6; font-size:15px; margin-top:5px;'>Crie sua empresa e seu acesso administrador</div>",
-                unsafe_allow_html=True,
-            )
+            st.markdown("<h2>Crie sua conta</h2>", unsafe_allow_html=True)
+            st.markdown("<div class='sub'>Crie sua empresa e seu acesso administrador.</div>", unsafe_allow_html=True)
 
             nome_empresa = st.text_input("Nome da empresa", key="cad_empresa_nome")
             cnpj_empresa = st.text_input("CNPJ (opcional)", key="cad_empresa_cnpj")
@@ -2017,13 +1367,9 @@ if not st.session_state.logado:
             email_admin = st.text_input("Seu e-mail", key="cad_admin_email")
             usuario_admin_cad = st.text_input("Usuário", key="cad_admin_usuario")
             senha_admin_cad = st.text_input("Senha", type="password", key="cad_admin_senha")
-            confirmar_senha_admin_cad = st.text_input(
-                "Confirmar senha",
-                type="password",
-                key="cad_admin_senha_confirmar",
-            )
+            confirmar_senha_admin_cad = st.text_input("Confirmar senha", type="password", key="cad_admin_senha_confirmar")
 
-            if st.button("CRIAR MINHA CONTA", key="btn_criar_minha_conta", use_container_width=True):
+            if st.button("Criar minha conta", key="btn_criar_minha_conta", use_container_width=True):
                 if not nome_empresa.strip():
                     st.error("Informe o nome da empresa.")
                 elif cnpj_empresa.strip() and not validar_cnpj(cnpj_empresa.strip()):
@@ -2064,19 +1410,13 @@ if not st.session_state.logado:
                     except Exception as exc:
                         st.error(f"Erro ao criar conta: {exc}")
         else:
-            st.markdown(
-                "<div style='text-align:center; color:#c7d7e6; font-size:15px; margin-top:5px;'>Acesse sua conta</div>",
-                unsafe_allow_html=True,
-            )
+            st.markdown("<h2>Acessar plataforma</h2>", unsafe_allow_html=True)
+            st.markdown("<div class='sub'>Entre com seu e-mail ou usuário corporativo.</div>", unsafe_allow_html=True)
 
-            usuario_input = st.text_input(
-                "Usuário ou e-mail", placeholder="Digite seu usuário ou e-mail"
-            )
-            senha_input = st.text_input(
-                "Senha", type="password", placeholder="Digite sua senha"
-            )
+            usuario_input = st.text_input("E-mail ou usuário", placeholder="Digite seu e-mail ou usuário", key="login_usuario_input")
+            senha_input = st.text_input("Senha", type="password", placeholder="Digite sua senha", key="login_senha_input")
 
-            if st.button("ENTRAR →", key="btn_login_submit", use_container_width=True):
+            if st.button("Entrar", key="btn_login_submit", use_container_width=True):
                 usuario_digitado = usuario_input.strip()
                 senha_digitada = senha_input.strip()
 
@@ -2088,12 +1428,17 @@ if not st.session_state.logado:
                         registrar_sessao_usuario(usuario)
                         st.rerun()
                     elif autenticar_admin(usuario_digitado, senha_digitada):
-                        st.error(
-                            "O acesso master legado não está habilitado neste fluxo SaaS. Cadastre este usuário na tabela usuarios."
-                        )
+                        st.error("O acesso master legado não está habilitado neste fluxo SaaS. Cadastre este usuário na tabela usuarios.")
                     else:
                         st.error("Usuário ou senha inválidos.")
+
+            st.caption("Ambiente seguro e preparado para empresas.")
+
+        st.markdown('</div></div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
+
 
 
 def validar_limite_usuarios_empresa(empresa_id):
