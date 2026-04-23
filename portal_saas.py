@@ -231,7 +231,7 @@ def obter_email_config():
     }
 
 
-def get_empresa_id():
+def get_empresa_contexto():
     empresa_id = st.session_state.get("empresa_id")
     if not empresa_id:
         st.error("Sessão inválida ou expirada. Faça login novamente.")
@@ -538,6 +538,14 @@ def autenticar_admin(usuario_digitado, senha_digitada):
         return hmac.compare_digest(admin_password_plain, senha_digitada or "")
 
     return False
+
+
+def get_empresa_contexto():
+    empresa_id = st.session_state.get("empresa_id_contexto")
+    if not empresa_id:
+        st.error("Nenhuma empresa selecionada ou vinculada ao usuário.")
+        st.stop()
+    return empresa_id
 
 
 def obter_cliente_por_usuario(usuario):
@@ -2790,6 +2798,10 @@ def render_sidebar_menu(menu_options, current_menu, logo_b64):
         "Cadastro de Cargos": "atendentes",
         "Documentos SST": "cadastros",
         "Vencimentos SST": "dashboard",
+        "Cadastro de Clientes": "clientes",
+        "Cadastro de Empresas": "clientes",
+        "Cadastro de Operadores": "atendentes",
+        "Painel de Cadastros": "cadastros",
     }
 
     if logo_b64:
@@ -2876,10 +2888,30 @@ st.session_state.setdefault("menu_atual", "Dashboard RH")
 menu_options_usuario = ["Nova Solicitação", "Demandas Solicitadas"]
 
 perfil_atual = st.session_state.get("perfil")
-if perfil_atual == "admin":
-    menu_options = menu_options_admin
-elif perfil_atual == "gestor":
-    menu_options = menu_options_gestor
+is_global = perfil_atual in ("superadmin", "operador")
+
+menu_options_cliente = [
+    "Dashboard RH",
+    "Quadro de Funcionários",
+    "Cadastro de Colaboradores",
+    "Cadastro de Filiais",
+    "Cadastro de Setores",
+    "Cadastro de Cargos",
+    "Documentos SST",
+    "Vencimentos SST",
+]
+
+menu_options_global = menu_options_cliente + [
+    "Cadastro de Clientes",
+    "Cadastro de Empresas",
+    "Cadastro de Operadores",
+    "Painel de Cadastros",
+]
+
+if is_global:
+    menu_options = menu_options_global
+elif perfil_atual in ("admin", "gestor"):
+    menu_options = menu_options_cliente
 else:
     menu_options = menu_options_usuario
 
@@ -2895,7 +2927,55 @@ atualizar_menu_sessao(st.session_state.get("token_sessao"), menu)
 persistir_query_params()
 
 with st.sidebar:
-    render_sidebar_menu(menu_options=menu_options, current_menu=menu, logo_b64=logo_b64)
+    empresa_id_contexto = None
+
+    if is_global:
+        empresas = conn.execute(
+            """
+            SELECT
+                id,
+                COALESCE(fantasia, razao_social, 'Empresa sem nome') AS nome
+            FROM empresas
+            WHERE ativo = TRUE
+            ORDER BY COALESCE(fantasia, razao_social, 'Empresa sem nome')
+            """
+        ).fetchall()
+
+        if empresas:
+            empresa_labels = [e["nome"] for e in empresas]
+
+            empresa_nome_padrao = st.session_state.get("empresa_nome_contexto")
+            if empresa_nome_padrao not in empresa_labels:
+                empresa_nome_padrao = empresa_labels[0]
+
+            empresa_nome_sel = st.selectbox(
+                "Empresa",
+                empresa_labels,
+                index=empresa_labels.index(empresa_nome_padrao),
+                key="empresa_global_filtro",
+            )
+
+            empresa_selecionada = next(
+                e for e in empresas if e["nome"] == empresa_nome_sel
+            )
+            empresa_id_contexto = empresa_selecionada["id"]
+            st.session_state["empresa_nome_contexto"] = empresa_nome_sel
+        else:
+            st.warning("Nenhuma empresa ativa encontrada.")
+    else:
+        empresa_id_contexto = st.session_state.get("empresa_id")
+        st.session_state["empresa_nome_contexto"] = (
+            st.session_state.get("empresa_nome") or ""
+        )
+
+    st.session_state["empresa_id_contexto"] = empresa_id_contexto
+
+    render_sidebar_menu(
+        menu_options=menu_options,
+        current_menu=menu,
+        logo_b64=logo_b64,
+    )
+
     st.markdown('<div style="flex:1;"></div>', unsafe_allow_html=True)
     st.markdown('<div class="bv-sidebar-divider"></div>', unsafe_allow_html=True)
 
@@ -2904,6 +2984,7 @@ with st.sidebar:
         .replace("_", " ")
         .strip()
     )
+
     partes_nome_usuario = [p for p in nome_usuario.split() if p]
     if len(partes_nome_usuario) >= 2:
         iniciais = (partes_nome_usuario[0][0] + partes_nome_usuario[1][0]).upper()
@@ -2924,6 +3005,9 @@ with st.sidebar:
         """,
         unsafe_allow_html=True,
     )
+
+    if is_global and st.session_state.get("empresa_nome_contexto"):
+        st.caption(f"Empresa em contexto: {st.session_state['empresa_nome_contexto']}")
 
     col_swap_i, col_swap_b = st.columns([0.18, 0.82], vertical_alignment="center")
     with col_swap_i:
@@ -3538,7 +3622,7 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
     exigir_perfil("admin", "gestor")
     st.header("Painel RH")
 
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
 
     dados = conn.execute(
         """
@@ -3735,11 +3819,261 @@ elif menu == "Dashboard RH" and perfil_atual in ("admin", "gestor"):
             st.dataframe(
                 tabela_aniversariantes, use_container_width=True, hide_index=True
             )
+elif menu == "Cadastro de Empresas" and perfil_atual in ("superadmin", "operador"):
+    st.header("Cadastro de Empresas")
+    st.caption("Gestão global das empresas da plataforma.")
+
+    with st.expander("Nova empresa", expanded=True):
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            razao_social = st.text_input("Razão Social", key="empresa_razao_social")
+            fantasia = st.text_input("Nome Fantasia", key="empresa_fantasia")
+            cnpj = st.text_input("CNPJ", key="empresa_cnpj")
+
+        with c2:
+            cep = st.text_input("CEP", key="empresa_cep")
+            logradouro = st.text_input("Logradouro", key="empresa_logradouro")
+            numero = st.text_input("Número", key="empresa_numero")
+
+        with c3:
+            bairro = st.text_input("Bairro", key="empresa_bairro")
+            cidade = st.text_input("Cidade", key="empresa_cidade")
+            ativo_empresa = st.checkbox("Ativa", value=True, key="empresa_ativa")
+
+        if st.button("Cadastrar Empresa", key="btn_cadastrar_empresa"):
+            if not razao_social.strip() and not fantasia.strip():
+                st.error("Informe ao menos a razão social ou o nome fantasia.")
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO empresas
+                    (cnpj, razao_social, fantasia, cep, logradouro, numero, bairro, cidade, ativo)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        formatar_cnpj(cnpj.strip()),
+                        razao_social.strip(),
+                        fantasia.strip(),
+                        cep.strip(),
+                        logradouro.strip(),
+                        numero.strip(),
+                        bairro.strip(),
+                        cidade.strip(),
+                        ativo_empresa,
+                    ),
+                )
+                st.success("Empresa cadastrada com sucesso.")
+                st.rerun()
+
+    st.markdown("---")
+    st.subheader("Empresas cadastradas")
+
+    if "empresa_editando_id" not in st.session_state:
+        st.session_state.empresa_editando_id = None
+
+    empresas = conn.execute(
+        """
+        SELECT id, cnpj, razao_social, fantasia, cidade, ativo
+        FROM empresas
+        ORDER BY COALESCE(fantasia, razao_social, 'Empresa sem nome')
+        """
+    ).fetchall()
+
+    if empresas:
+        empresas, _, _ = paginar_registros(
+            empresas,
+            "pagina_empresas_cadastro",
+            page_size=10,
+        )
+
+        for empresa in empresas:
+            empresa_id_item = empresa["id"]
+
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([3.2, 1.2, 3])
+
+                with c1:
+                    st.write(
+                        f"**ID {empresa['id']} - {empresa['fantasia'] or empresa['razao_social'] or 'Empresa sem nome'}**"
+                    )
+                    st.caption(empresa["razao_social"] or "Sem razão social")
+                    st.caption(empresa["cnpj"] or "Sem CNPJ")
+
+                with c2:
+                    st.write("Ativa" if bool(empresa["ativo"]) else "Inativa")
+                    st.caption(empresa["cidade"] or "Sem cidade")
+
+                with c3:
+                    b1, b2, b3 = st.columns(3)
+
+                    with b1:
+                        if bool(empresa["ativo"]):
+                            if st.button(
+                                "Inativar",
+                                key=f"inativar_empresa_{empresa_id_item}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE empresas SET ativo = FALSE WHERE id = %s",
+                                    (empresa_id_item,),
+                                )
+                                st.rerun()
+                        else:
+                            if st.button(
+                                "Ativar",
+                                key=f"ativar_empresa_{empresa_id_item}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE empresas SET ativo = TRUE WHERE id = %s",
+                                    (empresa_id_item,),
+                                )
+                                st.rerun()
+
+                    with b2:
+                        if st.button(
+                            "Excluir",
+                            key=f"excluir_empresa_{empresa_id_item}",
+                            use_container_width=True,
+                        ):
+                            possui_usuarios = conn.execute(
+                                "SELECT 1 FROM usuarios WHERE empresa_id = %s LIMIT 1",
+                                (empresa_id_item,),
+                            ).fetchone()
+
+                            if possui_usuarios:
+                                st.warning(
+                                    "Esta empresa possui usuários vinculados. Inative ao invés de excluir."
+                                )
+                            else:
+                                conn.execute(
+                                    "DELETE FROM empresas WHERE id = %s",
+                                    (empresa_id_item,),
+                                )
+                                st.success("Empresa excluída.")
+                                st.rerun()
+
+                    with b3:
+                        if st.button(
+                            "Alterar",
+                            key=f"alterar_empresa_{empresa_id_item}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.empresa_editando_id = empresa_id_item
+                            st.rerun()
+
+                if st.session_state.empresa_editando_id == empresa_id_item:
+                    empresa_full = conn.execute(
+                        """
+                        SELECT id, cnpj, razao_social, fantasia, cep, logradouro, numero, bairro, cidade
+                        FROM empresas
+                        WHERE id = %s
+                        """,
+                        (empresa_id_item,),
+                    ).fetchone()
+
+                    e1, e2, e3 = st.columns(3)
+
+                    with e1:
+                        novo_cnpj = st.text_input(
+                            "CNPJ",
+                            value=empresa_full["cnpj"] or "",
+                            key=f"edit_empresa_cnpj_{empresa_id_item}",
+                        )
+                        nova_razao = st.text_input(
+                            "Razão Social",
+                            value=empresa_full["razao_social"] or "",
+                            key=f"edit_empresa_razao_{empresa_id_item}",
+                        )
+                        nova_fantasia = st.text_input(
+                            "Nome Fantasia",
+                            value=empresa_full["fantasia"] or "",
+                            key=f"edit_empresa_fantasia_{empresa_id_item}",
+                        )
+
+                    with e2:
+                        novo_cep = st.text_input(
+                            "CEP",
+                            value=empresa_full["cep"] or "",
+                            key=f"edit_empresa_cep_{empresa_id_item}",
+                        )
+                        novo_logradouro = st.text_input(
+                            "Logradouro",
+                            value=empresa_full["logradouro"] or "",
+                            key=f"edit_empresa_logradouro_{empresa_id_item}",
+                        )
+                        novo_numero = st.text_input(
+                            "Número",
+                            value=empresa_full["numero"] or "",
+                            key=f"edit_empresa_numero_{empresa_id_item}",
+                        )
+
+                    with e3:
+                        novo_bairro = st.text_input(
+                            "Bairro",
+                            value=empresa_full["bairro"] or "",
+                            key=f"edit_empresa_bairro_{empresa_id_item}",
+                        )
+                        nova_cidade = st.text_input(
+                            "Cidade",
+                            value=empresa_full["cidade"] or "",
+                            key=f"edit_empresa_cidade_{empresa_id_item}",
+                        )
+
+                    a1, a2 = st.columns(2)
+
+                    with a1:
+                        if st.button(
+                            "Salvar alteração",
+                            key=f"salvar_empresa_{empresa_id_item}",
+                            use_container_width=True,
+                        ):
+                            conn.execute(
+                                """
+                                UPDATE empresas
+                                SET cnpj = %s,
+                                    razao_social = %s,
+                                    fantasia = %s,
+                                    cep = %s,
+                                    logradouro = %s,
+                                    numero = %s,
+                                    bairro = %s,
+                                    cidade = %s
+                                WHERE id = %s
+                                """,
+                                (
+                                    formatar_cnpj(novo_cnpj.strip()),
+                                    nova_razao.strip(),
+                                    nova_fantasia.strip(),
+                                    novo_cep.strip(),
+                                    novo_logradouro.strip(),
+                                    novo_numero.strip(),
+                                    novo_bairro.strip(),
+                                    nova_cidade.strip(),
+                                    empresa_id_item,
+                                ),
+                            )
+                            st.session_state.empresa_editando_id = None
+                            st.success("Empresa atualizada com sucesso.")
+                            st.rerun()
+
+                    with a2:
+                        if st.button(
+                            "Cancelar alteração",
+                            key=f"cancelar_empresa_{empresa_id_item}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.empresa_editando_id = None
+                            st.rerun()
+    else:
+        st.info("Nenhuma empresa cadastrada ainda.")
+
 
 elif menu == "Cadastro de Filiais" and perfil_atual in ("admin", "gestor"):
     exigir_perfil("admin", "gestor")
     st.header("Cadastro de Filiais")
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
 
     with st.expander("Nova filial", expanded=True):
         c1, c2, c3 = st.columns(3)
@@ -3924,10 +4258,11 @@ elif menu == "Cadastro de Filiais" and perfil_atual in ("admin", "gestor"):
     else:
         st.info("Nenhuma filial cadastrada ainda.")
 
+
 elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor"):
     exigir_perfil("admin", "gestor")
     st.header("Cadastro de Colaboradores")
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
 
     filiais = conn.execute(
         "SELECT id, nome FROM filiais WHERE empresa_id = %s AND ativo = TRUE ORDER BY nome",
@@ -4410,7 +4745,7 @@ elif menu == "Cadastro de Colaboradores" and perfil_atual in ("admin", "gestor")
 elif menu == "Cadastro de Setores" and perfil_atual in ("admin", "gestor"):
     exigir_perfil("admin", "gestor")
     st.header("Cadastro de Setores")
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
 
     with st.expander("Novo setor", expanded=True):
         nome_setor = st.text_input("Nome do Setor", key="setor_nome")
@@ -4538,7 +4873,7 @@ elif menu == "Cadastro de Setores" and perfil_atual in ("admin", "gestor"):
 elif menu == "Cadastro de Cargos" and perfil_atual in ("admin", "gestor"):
     exigir_perfil("admin", "gestor")
     st.header("Cadastro de Cargos")
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
 
     with st.expander("Novo cargo", expanded=True):
         nome_cargo = st.text_input("Nome do Cargo", key="cargo_nome")
@@ -4662,10 +4997,338 @@ elif menu == "Cadastro de Cargos" and perfil_atual in ("admin", "gestor"):
     else:
         st.info("Nenhum cargo cadastrado ainda.")
 
+elif menu == "Cadastro de Clientes" and perfil_atual in ("superadmin", "operador"):
+    st.header("Cadastro de Clientes")
+    st.caption("Gestão global dos clientes vinculados às empresas.")
+
+    empresas = conn.execute(
+        """
+        SELECT id, COALESCE(fantasia, razao_social, 'Empresa sem nome') AS nome
+        FROM empresas
+        WHERE ativo = TRUE
+        ORDER BY COALESCE(fantasia, razao_social, 'Empresa sem nome')
+        """
+    ).fetchall()
+
+    empresa_id_filtro = None
+    if empresas:
+        empresa_labels = ["Todas"] + [e["nome"] for e in empresas]
+        empresa_nome_filtro = st.selectbox(
+            "Filtrar por empresa",
+            empresa_labels,
+            key="clientes_empresa_filtro",
+        )
+
+        if empresa_nome_filtro != "Todas":
+            empresa_id_filtro = next(
+                e["id"] for e in empresas if e["nome"] == empresa_nome_filtro
+            )
+
+    with st.expander("Novo cliente", expanded=True):
+        c1, c2, c3 = st.columns(3)
+
+        empresa_id_cliente = None
+        with c1:
+            nome_cliente = st.text_input("Nome", key="cliente_nome")
+            usuario_cliente = st.text_input("Usuário", key="cliente_usuario")
+            email_cliente = st.text_input("E-mail", key="cliente_email")
+
+        with c2:
+            cpf_cliente = st.text_input("CPF", key="cliente_cpf")
+            funcao_cliente = st.text_input("Função", key="cliente_funcao")
+            senha_cliente = st.text_input("Senha", type="password", key="cliente_senha")
+
+        with c3:
+            ativo_cliente = st.checkbox("Ativo", value=True, key="cliente_ativo")
+
+            if empresas:
+                empresa_nome_cliente = st.selectbox(
+                    "Empresa",
+                    [e["nome"] for e in empresas],
+                    key="cliente_empresa",
+                )
+                empresa_id_cliente = next(
+                    e["id"] for e in empresas if e["nome"] == empresa_nome_cliente
+                )
+            else:
+                st.warning("Cadastre ao menos uma empresa ativa.")
+
+        if st.button("Cadastrar Cliente", key="btn_cadastrar_cliente"):
+            if not nome_cliente.strip() or not usuario_cliente.strip():
+                st.error("Preencha nome e usuário.")
+            elif not empresa_id_cliente:
+                st.error("Selecione a empresa.")
+            else:
+                existe = conn.execute(
+                    "SELECT 1 FROM clientes WHERE usuario = %s LIMIT 1",
+                    (usuario_cliente.strip(),),
+                ).fetchone()
+
+                if existe:
+                    st.error("Já existe um cliente com esse usuário.")
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO clientes
+                        (usuario, senha, nome, ativo, cpf, empresa_id, funcao, email)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            usuario_cliente.strip(),
+                            (
+                                gerar_hash_senha(senha_cliente.strip())
+                                if senha_cliente.strip()
+                                else ""
+                            ),
+                            nome_cliente.strip(),
+                            ativo_cliente,
+                            formatar_cpf(cpf_cliente.strip()),
+                            empresa_id_cliente,
+                            funcao_cliente.strip(),
+                            email_cliente.strip().lower(),
+                        ),
+                    )
+                    st.success("Cliente cadastrado com sucesso.")
+                    st.rerun()
+
+    st.markdown("---")
+    st.subheader("Clientes cadastrados")
+
+    filtros = []
+    params = []
+
+    if empresa_id_filtro:
+        filtros.append("c.empresa_id = %s")
+        params.append(empresa_id_filtro)
+
+    where_clause = " AND ".join(filtros) if filtros else "TRUE"
+
+    clientes = conn.execute(
+        f"""
+        SELECT
+            c.id,
+            c.nome,
+            c.usuario,
+            c.email,
+            c.funcao,
+            c.ativo,
+            e.fantasia AS empresa_nome
+        FROM clientes c
+        LEFT JOIN empresas e ON e.id = c.empresa_id
+        WHERE {where_clause}
+        ORDER BY c.nome, c.usuario
+        """,
+        params,
+    ).fetchall()
+
+    if clientes:
+        clientes, _, _ = paginar_registros(
+            clientes,
+            "pagina_clientes_cadastro_global",
+            page_size=10,
+        )
+
+        for cliente in clientes:
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([2.4, 2.2, 2.8])
+
+                with c1:
+                    st.write(f"**{cliente['nome'] or cliente['usuario']}**")
+                    st.caption(cliente["usuario"])
+
+                with c2:
+                    st.write(cliente["empresa_nome"] or "Sem empresa")
+                    st.caption(cliente["funcao"] or "Sem função")
+
+                with c3:
+                    st.write(cliente["email"] or "Sem e-mail")
+                    st.caption("Ativo" if bool(cliente["ativo"]) else "Inativo")
+    else:
+        st.info("Nenhum cliente cadastrado ainda.")
+
+elif menu == "Painel de Cadastros" and perfil_atual in ("superadmin", "operador"):
+    st.header("Painel de Cadastros")
+    st.caption("Convites e pré-cadastros globais da plataforma.")
+
+    tab1, tab2, tab3 = st.tabs(["Novo convite", "Pendentes / enviados", "Concluídos"])
+
+    with tab1:
+        empresas = conn.execute(
+            """
+            SELECT id, COALESCE(fantasia, razao_social, 'Empresa sem nome') AS nome
+            FROM empresas
+            WHERE ativo = TRUE
+            ORDER BY COALESCE(fantasia, razao_social, 'Empresa sem nome')
+            """
+        ).fetchall()
+
+        nome_convite = st.text_input("Nome", key="convite_nome_global")
+        email_convite = st.text_input("E-mail", key="convite_email_global")
+        tipo_convite = st.selectbox(
+            "Perfil do usuário",
+            ["admin", "gestor", "usuario"],
+            key="convite_tipo_global",
+        )
+        obs_convite = st.text_area("Observação", key="convite_obs_global")
+
+        empresa_id_convite = None
+        if empresas:
+            empresa_nome = st.selectbox(
+                "Empresa",
+                [row["nome"] for row in empresas],
+                key="convite_empresa_global",
+            )
+            empresa_id_convite = next(
+                row["id"] for row in empresas if row["nome"] == empresa_nome
+            )
+        else:
+            st.warning("Cadastre ao menos uma empresa ativa.")
+
+        if st.button("Gerar convite e link", key="criar_convite_btn_global"):
+            if not nome_convite.strip() or not email_convite.strip():
+                st.error("Preencha nome e e-mail.")
+            elif not empresa_id_convite:
+                st.error("Selecione a empresa.")
+            else:
+                resultado_convite = criar_convite(
+                    nome=nome_convite,
+                    email=email_convite,
+                    empresa_id=empresa_id_convite,
+                    tipo_usuario=tipo_convite,
+                    observacao=obs_convite,
+                )
+
+                link = resultado_convite["link"]
+
+                if resultado_convite["email_enviado"]:
+                    st.success("Convite criado e enviado por e-mail com sucesso.")
+                else:
+                    st.warning(
+                        f"Convite criado, mas o e-mail não foi enviado. Motivo: {resultado_convite['email_msg']}"
+                    )
+
+                st.code(link, language="text")
+                st.session_state["ultimo_link_convite_global"] = link
+
+        ultimo_link = st.session_state.get("ultimo_link_convite_global")
+        if ultimo_link:
+            st.caption("Último link gerado")
+            st.code(ultimo_link, language="text")
+
+    with tab2:
+        convites = conn.execute(
+            """
+            SELECT
+                c.*,
+                e.fantasia AS empresa_nome
+            FROM convites_cadastro c
+            LEFT JOIN empresas e ON e.id = c.empresa_id
+            WHERE c.status IN ('pendente', 'enviado', 'expirado')
+            ORDER BY c.created_at DESC
+            """
+        ).fetchall()
+
+        if not convites:
+            st.info("Nenhum convite pendente/enviado.")
+        else:
+            for convite in convites:
+                link = montar_url_convite(convite["token"])
+
+                with st.container(border=True):
+                    c1, c2, c3, c4 = st.columns([2.4, 1.6, 1.4, 3.2])
+
+                    with c1:
+                        st.write(f"**{convite['nome']}**")
+                        st.caption(convite["email"])
+
+                    with c2:
+                        st.write(convite["tipo_usuario"].capitalize())
+                        st.caption(convite.get("empresa_nome") or "Sem empresa")
+
+                    with c3:
+                        st.write(convite["status"].capitalize())
+                        exp = (
+                            convite["expiracao_em"].strftime("%d/%m/%Y %H:%M")
+                            if convite["expiracao_em"]
+                            else "-"
+                        )
+                        st.caption(f"Expira em {exp}")
+
+                    with c4:
+                        a1, a2, a3 = st.columns(3)
+
+                        with a1:
+                            if st.button(
+                                "Reenviar",
+                                key=f"reenviar_convite_global_{convite['id']}",
+                                use_container_width=True,
+                            ):
+                                resultado_reenvio = reenviar_convite(convite["id"])
+                                st.session_state[
+                                    f"link_convite_global_{convite['id']}"
+                                ] = resultado_reenvio["link"]
+                                if resultado_reenvio["email_enviado"]:
+                                    st.success(
+                                        "Convite reenviado por e-mail com novo link."
+                                    )
+                                else:
+                                    st.warning(
+                                        f"Convite renovado, mas o e-mail não foi enviado. Motivo: {resultado_reenvio['email_msg']}"
+                                    )
+                                st.rerun()
+
+                        with a2:
+                            if st.button(
+                                "Cancelar",
+                                key=f"cancelar_convite_global_{convite['id']}",
+                                use_container_width=True,
+                            ):
+                                conn.execute(
+                                    "UPDATE convites_cadastro SET status = 'cancelado' WHERE id = %s",
+                                    (convite["id"],),
+                                )
+                                st.success("Convite cancelado.")
+                                st.rerun()
+
+                        with a3:
+                            st.code(
+                                st.session_state.get(
+                                    f"link_convite_global_{convite['id']}",
+                                    link,
+                                ),
+                                language="text",
+                            )
+
+    with tab3:
+        concluidos = conn.execute(
+            """
+            SELECT
+                c.*,
+                e.fantasia AS empresa_nome
+            FROM convites_cadastro c
+            LEFT JOIN empresas e ON e.id = c.empresa_id
+            WHERE c.status = 'concluido'
+            ORDER BY c.utilizado_em DESC NULLS LAST, c.created_at DESC
+            """
+        ).fetchall()
+
+        if not concluidos:
+            st.info("Nenhum cadastro concluído ainda.")
+        else:
+            for convite in concluidos:
+                with st.container(border=True):
+                    st.write(f"**{convite['nome']}** • {convite['email']}")
+                    st.caption(
+                        f"Perfil: {convite['tipo_usuario'].capitalize()} • "
+                        f"Empresa: {convite.get('empresa_nome') or 'Sem empresa'} • "
+                        f"Concluído em: {convite['utilizado_em'].strftime('%d/%m/%Y %H:%M') if convite['utilizado_em'] else '-'}"
+                    )
+
+
 elif menu == "Quadro de Funcionários" and perfil_atual in ("admin", "gestor"):
     exigir_perfil("admin", "gestor")
     st.header("Quadro de Funcionários")
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
 
     dados = conn.execute(
         """
@@ -4736,7 +5399,7 @@ elif menu == "Quadro de Funcionários" and perfil_atual in ("admin", "gestor"):
 elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
     exigir_perfil("admin", "gestor")
     st.header("Documentos SST")
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
     # atualizar_status_documentos_sst_empresa(empresa_id)
 
     t0 = time.perf_counter()
@@ -5135,7 +5798,7 @@ elif menu == "Documentos SST" and perfil_atual in ("admin", "gestor"):
 elif menu == "Vencimentos SST" and perfil_atual in ("admin", "gestor"):
     exigir_perfil("admin", "gestor")
     st.header("Vencimentos SST")
-    empresa_id = get_empresa_id()
+    empresa_id = get_empresa_contexto()
     atualizar_status_documentos_sst_empresa(empresa_id)
 
     resumo = conn.execute(
@@ -5226,36 +5889,38 @@ elif menu == "Vencimentos SST" and perfil_atual in ("admin", "gestor"):
     else:
         st.info("Nenhum documento SST cadastrado ainda.")
 
-elif menu == "Cadastro de Atendentes" and perfil_atual == "admin":
-    st.header("Cadastro de Atendentes")
+elif menu == "Cadastro de Operadores" and perfil_atual in ("superadmin", "operador"):
+    st.header("Cadastro de Operadores")
+    st.caption("Gestão de usuários internos da plataforma.")
 
-    with st.expander("Novo atendente", expanded=True):
-        nome_atendente = st.text_input("Nome do atendente")
-        usuario_atendente = st.text_input(
-            "Usuário do atendente",
-            value=gerar_usuario(nome_atendente) if nome_atendente.strip() else "",
-            key="novo_atendente_usuario",
+    with st.expander("Novo operador", expanded=True):
+        nome_operador = st.text_input("Nome do operador", key="novo_operador_nome")
+        usuario_operador = st.text_input(
+            "Usuário do operador",
+            value=gerar_usuario(nome_operador) if nome_operador.strip() else "",
+            key="novo_operador_usuario",
         )
-        email_atendente = st.text_input("E-mail", key="novo_atendente_email")
-        senha_atendente = st.text_input(
-            "Senha", type="password", key="novo_atendente_senha"
+        email_operador = st.text_input("E-mail", key="novo_operador_email")
+        senha_operador = st.text_input(
+            "Senha", type="password", key="novo_operador_senha"
         )
-        ativo_atendente = st.checkbox("Ativo", value=True, key="novo_atendente_ativo")
+        ativo_operador = st.checkbox("Ativo", value=True, key="novo_operador_ativo")
 
-        if st.button("Cadastrar Atendente"):
+        if st.button("Cadastrar Operador", key="btn_cadastrar_operador"):
             if (
-                not nome_atendente.strip()
-                or not usuario_atendente.strip()
-                or not senha_atendente.strip()
+                not nome_operador.strip()
+                or not usuario_operador.strip()
+                or not senha_operador.strip()
             ):
                 st.error("Preencha nome, usuário e senha.")
             else:
                 existe = conn.execute(
                     "SELECT 1 FROM atendentes WHERE usuario = %s",
-                    (usuario_atendente.strip(),),
+                    (usuario_operador.strip(),),
                 ).fetchone()
+
                 if existe:
-                    st.error("Já existe um atendente com esse usuário.")
+                    st.error("Já existe um operador com esse usuário.")
                 else:
                     conn.execute(
                         """
@@ -5263,147 +5928,151 @@ elif menu == "Cadastro de Atendentes" and perfil_atual == "admin":
                         VALUES (%s, %s, %s, %s, %s)
                         """,
                         (
-                            nome_atendente.strip(),
-                            usuario_atendente.strip(),
-                            gerar_hash_senha(senha_atendente.strip()),
-                            email_atendente.strip().lower(),
-                            ativo_atendente,
+                            nome_operador.strip(),
+                            usuario_operador.strip(),
+                            gerar_hash_senha(senha_operador.strip()),
+                            email_operador.strip().lower(),
+                            ativo_operador,
                         ),
                     )
-                    st.success("Atendente cadastrado com sucesso.")
+                    st.success("Operador cadastrado com sucesso.")
                     st.rerun()
 
     st.markdown("---")
-    st.subheader("Atendentes cadastrados")
+    st.subheader("Operadores cadastrados")
 
-    if "atendente_editando_id" not in st.session_state:
-        st.session_state.atendente_editando_id = None
+    if "operador_editando_id" not in st.session_state:
+        st.session_state.operador_editando_id = None
 
-    atendentes = obter_todos_atendentes()
+    operadores = obter_todos_atendentes()
 
-    if atendentes:
-        atendentes, _, _ = paginar_registros(
-            atendentes, "pagina_atendentes_cadastro", page_size=10
+    if operadores:
+        operadores, _, _ = paginar_registros(
+            operadores, "pagina_operadores_cadastro", page_size=10
         )
-        for atendente in atendentes:
-            atendente_id = atendente["id"]
+
+        for operador in operadores:
+            operador_id = operador["id"]
+
             with st.container(border=True):
                 col1, col2, col3 = st.columns([2.2, 2.4, 3.4])
 
                 with col1:
-                    st.write(f"**{atendente['usuario']}**")
-                    st.caption(atendente["nome"] or "")
+                    st.write(f"**{operador['usuario']}**")
+                    st.caption(operador["nome"] or "")
 
                 with col2:
-                    st.write(atendente["email"] or "Sem e-mail")
-                    st.write("Ativo" if bool(atendente["ativo"]) else "Inativo")
+                    st.write(operador["email"] or "Sem e-mail")
+                    st.write("Ativo" if bool(operador["ativo"]) else "Inativo")
 
                 with col3:
                     b1, b2, b3 = st.columns(3)
+
                     with b1:
-                        if bool(atendente["ativo"]):
+                        if bool(operador["ativo"]):
                             if st.button(
                                 "Inativar",
-                                key=f"inativar_atendente_{atendente_id}",
+                                key=f"inativar_operador_{operador_id}",
                                 use_container_width=True,
                             ):
                                 conn.execute(
                                     "UPDATE atendentes SET ativo = FALSE WHERE id = %s",
-                                    (atendente_id,),
+                                    (operador_id,),
                                 )
                                 st.rerun()
                         else:
                             if st.button(
                                 "Ativar",
-                                key=f"ativar_atendente_{atendente_id}",
+                                key=f"ativar_operador_{operador_id}",
                                 use_container_width=True,
                             ):
                                 conn.execute(
                                     "UPDATE atendentes SET ativo = TRUE WHERE id = %s",
-                                    (atendente_id,),
+                                    (operador_id,),
                                 )
                                 st.rerun()
 
                     with b2:
                         if st.button(
                             "Excluir",
-                            key=f"excluir_atendente_{atendente_id}",
+                            key=f"excluir_operador_{operador_id}",
                             use_container_width=True,
                         ):
                             possui_vinculo = conn.execute(
                                 "SELECT 1 FROM solicitacoes WHERE atendente_id = %s LIMIT 1",
-                                (atendente_id,),
+                                (operador_id,),
                             ).fetchone()
 
                             if possui_vinculo:
                                 st.warning(
-                                    "Este atendente já está vinculado a solicitações. Inative ao invés de excluir."
+                                    "Este operador já está vinculado a registros. Inative ao invés de excluir."
                                 )
                             else:
                                 conn.execute(
                                     "DELETE FROM atendentes WHERE id = %s",
-                                    (atendente_id,),
+                                    (operador_id,),
                                 )
-                                st.success("Atendente excluído.")
+                                st.success("Operador excluído.")
                                 st.rerun()
 
                     with b3:
                         if st.button(
                             "Alterar",
-                            key=f"alterar_atendente_{atendente_id}",
+                            key=f"alterar_operador_{operador_id}",
                             use_container_width=True,
                         ):
-                            st.session_state.atendente_editando_id = atendente_id
+                            st.session_state.operador_editando_id = operador_id
                             st.rerun()
 
-                if st.session_state.atendente_editando_id == atendente_id:
+                if st.session_state.operador_editando_id == operador_id:
                     ed1, ed2 = st.columns(2)
 
                     with ed1:
-                        novo_nome_at = st.text_input(
+                        novo_nome_op = st.text_input(
                             "Nome",
-                            value=atendente["nome"] or "",
-                            key=f"edit_at_nome_{atendente_id}",
+                            value=operador["nome"] or "",
+                            key=f"edit_op_nome_{operador_id}",
                         )
-                        novo_usuario_at = st.text_input(
+                        novo_usuario_op = st.text_input(
                             "Usuário",
-                            value=atendente["usuario"] or "",
-                            key=f"edit_at_usuario_{atendente_id}",
+                            value=operador["usuario"] or "",
+                            key=f"edit_op_usuario_{operador_id}",
                         )
 
                     with ed2:
-                        novo_email_at = st.text_input(
+                        novo_email_op = st.text_input(
                             "E-mail",
-                            value=atendente["email"] or "",
-                            key=f"edit_at_email_{atendente_id}",
+                            value=operador["email"] or "",
+                            key=f"edit_op_email_{operador_id}",
                         )
-                        nova_senha_at = st.text_input(
+                        nova_senha_op = st.text_input(
                             "Nova senha (opcional)",
                             type="password",
-                            key=f"edit_at_senha_{atendente_id}",
+                            key=f"edit_op_senha_{operador_id}",
                         )
 
                     a1, a2 = st.columns(2)
+
                     with a1:
                         if st.button(
                             "Salvar alteração",
-                            key=f"salvar_atendente_{atendente_id}",
+                            key=f"salvar_operador_{operador_id}",
                             use_container_width=True,
                         ):
-                            if not novo_nome_at.strip() or not novo_usuario_at.strip():
+                            if not novo_nome_op.strip() or not novo_usuario_op.strip():
                                 st.error("Preencha nome e usuário.")
                             else:
                                 usuario_existente = conn.execute(
                                     "SELECT 1 FROM atendentes WHERE usuario = %s AND id <> %s",
-                                    (novo_usuario_at.strip(), atendente_id),
+                                    (novo_usuario_op.strip(), operador_id),
                                 ).fetchone()
 
                                 if usuario_existente:
                                     st.error(
-                                        "Já existe outro atendente com esse usuário."
+                                        "Já existe outro operador com esse usuário."
                                     )
                                 else:
-                                    if nova_senha_at.strip():
+                                    if nova_senha_op.strip():
                                         conn.execute(
                                             """
                                             UPDATE atendentes
@@ -5411,11 +6080,11 @@ elif menu == "Cadastro de Atendentes" and perfil_atual == "admin":
                                             WHERE id = %s
                                             """,
                                             (
-                                                novo_nome_at.strip(),
-                                                novo_usuario_at.strip(),
-                                                novo_email_at.strip().lower(),
-                                                gerar_hash_senha(nova_senha_at.strip()),
-                                                atendente_id,
+                                                novo_nome_op.strip(),
+                                                novo_usuario_op.strip(),
+                                                novo_email_op.strip().lower(),
+                                                gerar_hash_senha(nova_senha_op.strip()),
+                                                operador_id,
                                             ),
                                         )
                                     else:
@@ -5426,26 +6095,27 @@ elif menu == "Cadastro de Atendentes" and perfil_atual == "admin":
                                             WHERE id = %s
                                             """,
                                             (
-                                                novo_nome_at.strip(),
-                                                novo_usuario_at.strip(),
-                                                novo_email_at.strip().lower(),
-                                                atendente_id,
+                                                novo_nome_op.strip(),
+                                                novo_usuario_op.strip(),
+                                                novo_email_op.strip().lower(),
+                                                operador_id,
                                             ),
                                         )
 
-                                    st.session_state.atendente_editando_id = None
-                                    st.success("Atendente atualizado com sucesso.")
+                                    st.session_state.operador_editando_id = None
+                                    st.success("Operador atualizado com sucesso.")
                                     st.rerun()
+
                     with a2:
                         if st.button(
                             "Cancelar alteração",
-                            key=f"cancelar_atendente_{atendente_id}",
+                            key=f"cancelar_operador_{operador_id}",
                             use_container_width=True,
                         ):
-                            st.session_state.atendente_editando_id = None
+                            st.session_state.operador_editando_id = None
                             st.rerun()
     else:
-        st.info("Nenhum atendente cadastrado ainda.")
+        st.info("Nenhum operador cadastrado ainda.")
 
 
 elif menu == "Painel de Cadastros" and perfil_atual == "admin":
